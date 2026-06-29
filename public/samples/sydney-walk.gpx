@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="intelliGIS">
+  <metadata>
+    <name>Sydney Harbour Walk</name>
+  </metadata>
+  <wpt lat="-33.8568" lon="151.2153">
+    <name>Opera House</name>
+  </wpt>
+  <wpt lat="-33.8523" lon="151.2108">
+    <name>Harbour Bridge</name>
+  </wpt>
+  <wpt lat="-33.8688" lon="151.2093">
+    <name>Circular Quay</name>
+  </wpt>
+</gpx>

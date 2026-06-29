@@ -1,0 +1,70 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Sydney CBD",
+        "population": 25000,
+        "suburb": "Sydney",
+        "state": "NSW"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [151.2093, -33.8688]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Bondi Beach",
+        "population": 12000,
+        "suburb": "Bondi Beach",
+        "state": "NSW"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [151.2743, -33.8915]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Parramatta",
+        "population": 32000,
+        "suburb": "Parramatta",
+        "state": "NSW"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [151.0042, -33.8150]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Manly",
+        "population": 18000,
+        "suburb": "Manly",
+        "state": "NSW"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [151.2877, -33.7969]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Chatswood",
+        "population": 28000,
+        "suburb": "Chatswood",
+        "state": "NSW"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [151.1833, -33.7968]
+      }
+    }
+  ]
+}
