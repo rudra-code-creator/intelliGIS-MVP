@@ -1,0 +1,62 @@
+@import 'tailwindcss';
+@import 'maplibre-gl/dist/maplibre-gl.css';
+
+:root {
+  --background: #050b18;
+  --foreground: #eef2f6;
+
+  /* Pitch deck palette — dark navy + teal */
+  --brand-navy-950: #020817;
+  --brand-navy-900: #050b18;
+  --brand-navy-800: #0a1528;
+  --brand-navy-700: #0f1f3a;
+  --brand-navy-600: #152a47;
+  --brand-teal-300: #5eead4;
+  --brand-teal-400: #2ee8c8;
+  --brand-teal-500: #00b8a0;
+  --brand-teal-600: #009080;
+  --brand-teal-700: #007868;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-brand-navy-950: var(--brand-navy-950);
+  --color-brand-navy-900: var(--brand-navy-900);
+  --color-brand-navy-800: var(--brand-navy-800);
+  --color-brand-navy-700: var(--brand-navy-700);
+  --color-brand-navy-600: var(--brand-navy-600);
+  --color-brand-teal-300: var(--brand-teal-300);
+  --color-brand-teal-400: var(--brand-teal-400);
+  --color-brand-teal-500: var(--brand-teal-500);
+  --color-brand-teal-600: var(--brand-teal-600);
+  --color-brand-teal-700: var(--brand-teal-700);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+@media print {
+  aside, header, .no-print {
+    display: none !important;
+  }
+}
+
+.maplibregl-ctrl-group {
+  background: rgba(10, 21, 40, 0.92) !important;
+  border: 1px solid rgba(0, 184, 160, 0.15) !important;
+  border-radius: 12px !important;
+  backdrop-filter: blur(12px);
+}
+
+.maplibregl-ctrl-group button {
+  filter: invert(1);
+}

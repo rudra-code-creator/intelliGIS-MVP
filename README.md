@@ -1,174 +1,86 @@
-# intelliGIS MVP
+# intelliGIS — Proof of Concept
 
-AI-powered Geographic Information System — upload, visualise, analyse, and chat with geospatial data.
+AI-powered urban planning platform for demonstrating the vision of natural-language master plan generation.
 
-## Features
-
-- **Landing page** — Modern marketing site with hero, features, and pricing
-- **Authentication** — Sign up, login, logout via Supabase Auth
-- **Dashboard** — Project management with recent projects and statistics
-- **Map viewer** — Interactive MapLibre map with pan, zoom, basemap switching, measurement, and location search
-- **Data upload** — GeoJSON, CSV, KML, GPX, and ZIP Shapefiles
-- **Layer manager** — Visibility, rename, delete, opacity, and colour controls
-- **AI GIS assistant** — ChatGPT-like interface powered by OpenAI Responses API
-- **Dataset summary** — Feature count, geometry types, bounds, attributes, CRS detection
-- **Charts** — Bar, pie, line, and histogram via Recharts
-- **User settings** — Theme, profile, and account management
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Frontend | React, Vite, TypeScript, TailwindCSS, shadcn/ui |
-| Routing | React Router |
-| Data fetching | TanStack Query |
-| Maps | MapLibre GL JS, OpenStreetMap basemaps |
-| Backend | Netlify Functions (Node.js) |
-| Database | Supabase (PostgreSQL) |
-| Auth | Supabase Auth |
-| Storage | Supabase Storage |
-| AI | OpenAI Responses API |
-| Charts | Recharts |
-| Forms | React Hook Form + Zod |
-| Deployment | Netlify |
+**Figma + ChatGPT + Google Maps + GIS** for urban planners.
 
 ## Quick Start
 
-### Prerequisites
-
-- Node.js 20+
-- npm
-- Supabase account
-- OpenAI API key (for AI chat)
-- Netlify account (for deployment)
-
-### 1. Clone and install
-
 ```bash
-git clone <your-repo-url>
-cd intelliGIS-MVP
 npm install
-```
-
-### 2. Configure environment
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env` with your credentials:
-
-```env
-VITE_SUPABASE_URL=https://your-project.supabase.co
-VITE_SUPABASE_ANON_KEY=your-anon-key
-```
-
-### 3. Set up Supabase
-
-1. Create a new Supabase project
-2. Run the migration in `supabase/migrations/001_initial_schema.sql` via the SQL Editor
-3. Enable Email auth in Authentication → Providers
-4. Copy your project URL and anon key to `.env`
-
-### 4. Run locally
-
-**Frontend only:**
-
-```bash
 npm run dev
 ```
 
-**With Netlify Functions (recommended for AI chat):**
+Open [http://localhost:3000](http://localhost:3000) → **Launch App**
 
-```bash
-npm run dev:netlify
+## Demo Flow
+
+1. Open the **Planner Workspace**
+2. Click **Draw Boundary** (or **Sample Area** for a quick demo)
+3. Enter a prompt or choose a preset (e.g. 🚉 Transit Oriented Development)
+4. Click **Generate Master Plan**
+5. Watch AI loading animation → layers animate onto the map
+6. Review summary metrics and construction timeline
+7. Export PNG or JSON
+
+## Tech Stack
+
+- Next.js (App Router) · TypeScript · TailwindCSS
+- MapLibre GL JS · OpenStreetMap tiles
+- Zustand · Turf.js · shadcn-style UI
+- OpenAI API (optional) · Mock provider fallback
+
+## AI Provider
+
+The app supports **NVIDIA NIM** (recommended free tier), **OpenAI**, or **mock data** fallback.
+
+### NVIDIA NIM + GLM-5.2 (recommended)
+
+1. Sign up at [build.nvidia.com](https://build.nvidia.com)
+2. Generate an API key at [build.nvidia.com/settings](https://build.nvidia.com/settings)
+3. Add to `.env.local`:
+
+```env
+AI_PROVIDER=nvidia
+NVIDIA_API_KEY=nvapi-your-key-here
+NVIDIA_MODEL=z-ai/glm-5.2
 ```
 
-Open [http://localhost:8888](http://localhost:8888)
+Endpoint: `https://integrate.api.nvidia.com/v1` · Model: `z-ai/glm-5.2`
 
-### 5. Test with sample data
+If no API key is set, the demo uses realistic mock data and **always works**.
 
-Sample datasets are in `public/samples/`:
+### OpenAI (optional)
 
-- `sydney-suburbs.geojson` — Point features with population data
-- `sydney-points.csv` — CSV with lat/lng columns
-
-## Project Structure
-
-```
-├── netlify/
-│   └── functions/          # Serverless API (AI chat)
-├── public/
-│   └── samples/            # Sample geospatial datasets
-├── src/
-│   ├── api/                # API client functions
-│   ├── components/
-│   │   ├── ui/             # shadcn/ui components
-│   │   ├── map/            # Map viewer, upload, summary
-│   │   ├── chat/           # AI assistant
-│   │   ├── layers/         # Layer manager
-│   │   ├── charts/         # Chart components
-│   │   ├── layout/         # App shell, protected routes
-│   │   └── common/         # Loading, empty, error states
-│   ├── hooks/              # Auth, theme hooks
-│   ├── pages/              # Route pages
-│   ├── services/           # Supabase, upload, projects
-│   ├── styles/             # Global CSS
-│   ├── types/              # TypeScript types
-│   └── utils/              # Geo parsing, map utils
-├── supabase/
-│   └── migrations/         # Database schema
-├── .github/workflows/      # CI/CD
-├── netlify.toml            # Netlify configuration
-└── .env.example            # Environment template
+```env
+AI_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-4.1-mini
 ```
 
-## Deploy to Netlify
+Provider priority when `AI_PROVIDER` is unset: `NVIDIA_API_KEY` → `OPENAI_API_KEY` → mock.
 
-### Option A: Netlify CLI
+## Architecture
 
-```bash
-npm install -g netlify-cli
-netlify login
-netlify init
-netlify deploy --prod
+```
+src/
+├── app/              # Landing + Planner pages, API route
+├── components/
+│   ├── Map/          # MapLibre canvas + drawing
+│   ├── AI/           # Prompt panel, presets, loader
+│   ├── Sidebar/      # Layer toggles + legend
+│   ├── Summary/      # Master plan metrics
+│   ├── Timeline/     # Construction phases
+│   └── Planning/     # Workspace shell + export
+├── lib/ai/           # AIProvider interface, NVIDIA NIM, OpenAI, Mock
+├── store/            # Zustand planner state
+├── types/            # Master plan types + presets
+└── utils/            # Mock geometry generator
 ```
 
-### Option B: Git integration
+## Not Built (Placeholders Only)
 
-1. Push to GitHub
-2. Connect repo in Netlify dashboard
-3. Build settings are auto-detected from `netlify.toml`
-
-### Environment variables (Netlify dashboard)
-
-Set these in **Site settings → Environment variables**:
-
-| Variable | Scope | Description |
-|----------|-------|-------------|
-| `VITE_SUPABASE_URL` | Build + Runtime | Supabase project URL |
-| `VITE_SUPABASE_ANON_KEY` | Build + Runtime | Supabase anon key |
-| `OPENAI_API_KEY` | Functions only | OpenAI API key |
-| `OPENAI_MODEL` | Functions only | Model name (default: gpt-4.1-mini) |
-
-> **Note:** `VITE_*` variables must be set at build time. Redeploy after adding them.
-
-## Scripts
-
-| Command | Description |
-|---------|-------------|
-| `npm run dev` | Start Vite dev server |
-| `npm run dev:netlify` | Start with Netlify Functions |
-| `npm run build` | Production build |
-| `npm run preview` | Preview production build |
-| `npm run lint` | Run ESLint |
-
-## Security
-
-- Row Level Security (RLS) on all Supabase tables
-- OpenAI API key stored server-side only
-- Security headers configured in `netlify.toml`
-- User data isolated by `auth.uid()` policies
+Authentication · Database · Projects · Collaboration · Real GIS uploads
 
 ## License
 
