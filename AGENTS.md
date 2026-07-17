@@ -22,3 +22,10 @@
 - Planner workspace layout: left layer sidebar, center map, right AI prompt panel
 - Public GitHub repo: rudra-code-creator/intelliGIS
 - Primary demo audience: investors, startup accelerators, and government innovation programs
+
+## Cursor Cloud specific instructions
+
+- Single Next.js service; standard commands live in `package.json` (`npm run dev`, `npm run build`, `npm run lint`). Dev server runs on `http://localhost:3000`.
+- No API key is required to run or demo the app: with no `AI_PROVIDER`/`NVIDIA_API_KEY`/`OPENAI_API_KEY` set, the API routes fall back to the mock provider and every flow (generate master plan, metrics, timeline) works fully. To exercise real AI, set keys in `.env.local` per `README.md`.
+- Hello-world / smoke check: POST to `/api/generate` with `{ prompt, boundary }` (a GeoJSON Polygon Feature) returns plan layers, or use the UI: Launch App → Use Sample Area → pick a preset → Generate Master Plan.
+- `npm run lint` currently reports 2 pre-existing errors (`chat-completion.ts` prefer-const, `MapCanvas` ref-during-render) plus warnings. These are pre-existing code issues, not environment problems.
