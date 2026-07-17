@@ -1,7 +1,8 @@
 import type { GenerateRequest, MasterPlanResult } from '@/types/master-plan'
 import { generateMockMasterPlan } from '@/utils/mock-generator'
-import { finalizeMasterPlan } from '@/utils/plan-finalize'
-import { fetchSiteContext } from '@/utils/osm-context'
+import { finalizeMasterPlan } from '@/utils/plan-finalize-server'
+import { fetchMergedSiteContext } from '@/utils/site-constraints'
+import type { SiteContext } from '@/utils/osm-context'
 import { v4 as uuid } from 'uuid'
 import { buildTimeline } from '@/utils/mock-generator-helpers'
 
@@ -11,14 +12,14 @@ export interface ChatGenerationResult {
   plan: MasterPlanResult
   summarySource: 'ai' | 'mock'
   geometrySource: GeometrySource
-  siteContext: Awaited<ReturnType<typeof fetchSiteContext>>
+  siteContext: SiteContext
 }
 
 export async function generateMasterPlanFromChat(
   request: GenerateRequest,
   config: { baseUrl: string; apiKey: string; model: string; useJsonMode?: boolean },
 ): Promise<ChatGenerationResult> {
-  const siteContext = await fetchSiteContext(request.boundary)
+  const siteContext = await fetchMergedSiteContext(request.boundary)
   const boundaryJson = JSON.stringify(request.boundary.geometry)
 
   const body: Record<string, unknown> = {
@@ -36,7 +37,10 @@ ${siteContext.summaryText}
 Boundary polygon (all coordinates MUST stay inside this):
 ${boundaryJson}
 
-Design a realistic master plan narrative. Geometry is generated automatically from OpenStreetMap street blocks — you only provide the summary and annotations.`,
+Design a realistic, technically feasible master plan narrative.
+Geometry is generated automatically from OpenStreetMap street blocks. Before generation, a basemap colour scout marks visible river (blue), highway (red), and arterial (orange/yellow) pixels as no-build zones — you only provide the summary and annotations.
+Do NOT propose relocating rivers, railways, or motorways/trunks unless the planning prompt explicitly requires it.
+Cost and density must reflect infill around fixed infrastructure, not a blank-slate rebuild.`,
       },
     ],
   }
@@ -87,12 +91,26 @@ Design a realistic master plan narrative. Geometry is generated automatically fr
 
 const SYSTEM_PROMPT = `You are a world-class urban planner and GIS expert for intelliGIS.
 
-The application builds map geometry automatically from OpenStreetMap:
-- Roads follow existing streets only
-- Buildings are placed in developable blocks between streets
+The application builds map geometry automatically from OpenStreetMap street blocks:
+- Roads follow existing streets; motorways/trunks stay as the arterial spine
+- Buildings are placed only in developable blocks between streets
 - Existing buildings and sports fields are preserved
+- HARD CONSTRAINTS are never overwritten: rivers/water bodies, railways, motorways/trunks, and major arterials
+- Flood-prone land may be zoned; only the actual river channel is a hard no-build for buildings
+- Existing buildings and sports fields are preserved
+- Local roads, bike paths, and transit must not cross rivers or railway corridors except for a few intentional bridges
+- Neighbourhood fabric typically mixes several street patterns (grid, suburban cul-de-sacs, organic, irregular, etc.)
 
 Your job is to write the planning SUMMARY and optional map annotations. Do NOT invent road coordinates.
+
+HARD CONSTRAINT RULES for narrative and KPIs:
+- Assume rivers, rail, highways, and major arterials STAY unless the user prompt explicitly demands moving/realigning them
+- Zoning may use flood-prone areas with appropriate caveats; do not claim buildings sit in the river itself
+- Prefer adaptive reuse / infill over blank-slate megaprojects
+- developmentCost must reflect working WITH existing hard infrastructure (not fantasising demolishing a river or motorway)
+- populationCapacity and estimatedJobs should be realistic for available developable land after hard constraints
+- Narrative must mention how the plan complements named hard infrastructure when present (river, rail, highway)
+- Mention the street fabric character when relevant (grid, suburban cul-de-sacs, loose grid, organic, etc.)
 
 Return ONLY valid JSON:
 {
@@ -104,12 +122,12 @@ Return ONLY valid JSON:
     "transitAccessibility": <number>,
     "carbonImpact": "<string>",
     "developmentCost": "<string>",
-    "narrative": "<2-3 sentences describing an artist-impression master plan that respects existing streets and buildings>"
+    "narrative": "<2-3 sentences: artist-impression master plan that respects hard constraints and existing streets>"
   },
   "annotations": [{ "text": "<label>", "coords": [lng, lat] }]
 }
 
-Australian urban planning context. Narrative should reference respecting existing street grid and infrastructure.`
+Australian urban planning context.`
 
 interface ParsedAiOutput {
   summary?: Partial<MasterPlanResult['summary']>
@@ -129,7 +147,7 @@ function parseJsonResponse(content: string): ParsedAiOutput {
 async function buildPlanFromAiResponse(
   request: GenerateRequest,
   parsed: ParsedAiOutput,
-  siteContext: Awaited<ReturnType<typeof fetchSiteContext>>,
+  siteContext: SiteContext,
 ): Promise<ChatGenerationResult> {
   const mock = generateMockMasterPlan(request)
 

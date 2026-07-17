@@ -2,7 +2,7 @@ import type { AIProvider } from '@/lib/ai/types'
 import type { GenerateRequest } from '@/types/master-plan'
 import { generateMasterPlanFromChat } from '@/lib/ai/chat-completion'
 import { generateMockMasterPlan } from '@/utils/mock-generator'
-import { finalizeMasterPlan } from '@/utils/plan-finalize'
+import { finalizeMasterPlan } from '@/utils/plan-finalize-server'
 import { PROVIDER_LABELS } from '@/types/provider'
 
 const OPENAI_BASE_URL = 'https://api.openai.com/v1'

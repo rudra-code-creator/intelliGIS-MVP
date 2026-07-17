@@ -61,13 +61,15 @@ export function useGeneratePlan() {
     const boundaryState = usePlannerStore.getState().boundary
     if (!boundaryState) return null
     try {
-      const response = await fetch('/api/osm-context', {
+      const response = await fetch('/api/site-constraints', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ boundary: boundaryState }),
       })
       if (!response.ok) return cached
-      return await response.json() as SiteContext
+      const ctx = await response.json()
+      if (!ctx || !Array.isArray(ctx.streets) || typeof ctx.summaryText !== 'string') return cached
+      return ctx as SiteContext
     } catch {
       return cached
     }
@@ -107,16 +109,9 @@ export function useGeneratePlan() {
       await animateLayers(plan)
     } catch {
       const { generateMockMasterPlan } = await import('@/utils/mock-generator')
-      const { finalizeMasterPlan } = await import('@/utils/plan-finalize')
       const mock = generateMockMasterPlan({ prompt: prompt.trim(), boundary })
-      const siteContext = await loadSiteContext()
-      const { plan: finalized, siteContext: ctx } = await finalizeMasterPlan(
-        mock,
-        boundary,
-        prompt.trim(),
-        siteContext,
-      )
-      const plan = applyOsmGeometry(finalized, ctx)
+      const ctx = await loadSiteContext()
+      const plan = applyOsmGeometry(mock, ctx)
       const meta: GenerationMeta = {
         providerId: 'mock',
         providerLabel: PROVIDER_LABELS.mock,
@@ -124,7 +119,7 @@ export function useGeneratePlan() {
         geometrySource: 'osm-blocks' satisfies GeometrySource,
         fallbackReason: 'Request failed — client-side OSM fallback',
       }
-      finishGeneration(plan, prompt.trim(), meta, ctx)
+      finishGeneration(plan, prompt.trim(), meta, ctx ?? undefined)
       await animateLayers(plan)
     }
   }, [boundary, prompt, startGeneration, setGenerationStep, finishGeneration, animateLayers, loadSiteContext])

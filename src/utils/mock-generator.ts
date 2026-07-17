@@ -1,5 +1,4 @@
 import type { GenerateRequest, MasterPlanResult } from '@/types/master-plan'
-import { finalizeMasterPlan } from '@/utils/plan-finalize'
 import { v4 as uuid } from 'uuid'
 import { buildSummary, buildTimeline } from '@/utils/mock-generator-helpers'
 import * as turf from '@turf/turf'

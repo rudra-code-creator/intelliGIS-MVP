@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server'
 import type { Feature, Polygon } from 'geojson'
 import { fetchMergedSiteContext } from '@/utils/site-constraints'
 
-/** @deprecated Prefer /api/site-constraints — kept for compatibility */
 export async function POST(request: Request) {
   try {
     const body = await request.json() as { boundary: Feature<Polygon> }
@@ -12,6 +11,6 @@ export async function POST(request: Request) {
     const context = await fetchMergedSiteContext(body.boundary)
     return NextResponse.json(context)
   } catch {
-    return NextResponse.json({ error: 'Failed to fetch OSM context' }, { status: 500 })
+    return NextResponse.json({ error: 'Failed to fetch site constraints' }, { status: 500 })
   }
 }

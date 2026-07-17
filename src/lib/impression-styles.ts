@@ -14,4 +14,9 @@ export const IMPRESSION = {
   transit: '#ef4444',
   bike: '#00b8a0',
   existingBuilding: '#64748b',
+  /** Hard-constraint overlays (match OSM basemap cues) */
+  water: '#7dd3fc',
+  railway: '#171717',
+  hardHighway: '#ef4444',
+  arterial: '#f59e0b',
 } as const
