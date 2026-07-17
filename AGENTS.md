@@ -22,3 +22,12 @@
 - Planner workspace layout: left layer sidebar, center map, right AI prompt panel
 - Public GitHub repo: rudra-code-creator/intelliGIS
 - Primary demo audience: investors, startup accelerators, and government innovation programs
+
+## Cursor Cloud specific instructions
+
+- Node 22 is available and works with Next.js 16; no version manager setup needed. Deps install via `npm install` (run automatically by the startup update script).
+- Standard commands live in `package.json`: `npm run dev` (dev server on port 3000), `npm run build`, `npm run lint`. Start the dev server yourself when testing (it is not started by the update script).
+- No database, auth, or external services are required to run or demo the app.
+- AI provider auto-detects from env: `NVIDIA_API_KEY` → `OPENAI_API_KEY` → mock. With no key set it falls back to the mock provider, which fully works for the demo (top-nav badge shows "Mock data"). To use real AI, add keys to `.env.local` (see `.env.example`); env changes require a dev server restart.
+- Hello-world/demo flow: open `/`, click "Launch App" → on `/planner` click "Use Sample Area" → pick a preset (e.g. "Transit Oriented") or type a prompt → "Generate Master Plan". Colored land-use layers render on the map with a summary/metrics panel and construction timeline.
+- Pre-existing `npm run lint` reports 2 errors and several warnings in the current tree; these are unrelated to environment setup.
