@@ -4,6 +4,8 @@ AI-powered urban planning platform for demonstrating the vision of natural-langu
 
 **Figma + ChatGPT + Google Maps + GIS** for urban planners.
 
+[![Netlify Status](https://api.netlify.com/api/v1/badges/6d3c84fd-7cdf-4a09-b614-07521d6ddeea/deploy-status)](https://app.netlify.com/projects/intelligis-mvp/deploys)
+
 ## Quick Start
 
 ```bash
