@@ -106,7 +106,7 @@ export function ProviderIndicator({ variant = 'compact', className }: ProviderIn
           )}
           {!lastMeta && configuredProvider.geometryCapable && (
             <p className="pt-1 text-zinc-500">
-              Geometry is designed by the LLM using your boundary + OpenStreetMap context (rivers, existing roads). Generate to see results.
+              Geometry follows OpenStreetMap street blocks with hard constraints (rivers, rail, highways). The LLM writes the planning narrative. Generate to see results.
             </p>
           )}
         </div>

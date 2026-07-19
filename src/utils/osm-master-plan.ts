@@ -3,15 +3,21 @@ import { v4 as uuid } from 'uuid'
 import type { Feature, FeatureCollection, LineString, Point, Polygon, Position } from 'geojson'
 import type { MasterPlanLayers } from '@/types/master-plan'
 import type { OsmStreet, SiteContext } from '@/utils/osm-context'
+import { buildTransportForbiddenAreas, HARD_HIGHWAYS } from '@/utils/osm-context'
 import {
+  distanceToWaterways,
+  filterFootprintsOffConstraints,
+  filterStreetsAllowingBridges,
+  getConstraintIndex,
   isDevelopableBlock,
+  lineCrossesForbidden,
   pointOnDevelopableLand,
   prepareDevelopableParcel,
   samplePointsAlongPolygonEdge,
-  subtractBuildingsFromPolygon,
 } from '@/utils/building-avoidance'
 import { buildHospitalCampus, buildSchoolCampus } from '@/utils/civic-footprints'
 import { enrichRoadCollection } from '@/utils/osm-road-enrich'
+import { generateStyledBlocks } from '@/utils/layout-styles'
 import type { RoadClass } from '@/utils/road-names'
 
 export interface PlanIntent {
@@ -40,14 +46,19 @@ export function parsePlanIntent(prompt: string): PlanIntent {
 }
 
 function highwayToClass(highway: string): RoadClass {
-  if (['motorway', 'trunk', 'primary'].includes(highway)) return 'arterial'
+  // Motorway/trunk always remain the arterial spine
+  if (HARD_HIGHWAYS.has(highway) || highway === 'primary') return 'arterial'
   if (['secondary', 'tertiary'].includes(highway)) return 'collector'
   if (['residential', 'living_street', 'unclassified'].includes(highway)) return 'local'
   if (highway === 'service') return 'cul-de-sac'
   return 'local'
 }
 
-function buildRoadsFromStreets(streets: OsmStreet[]): FeatureCollection<LineString> {
+function buildRoadsFromStreets(
+  streets: OsmStreet[],
+  forbidden: FeatureCollection<Polygon>,
+  bridgeIds: Set<string>,
+): FeatureCollection<LineString> {
   const raw = turf.featureCollection(
     streets.map((s) =>
       turf.lineString(s.coordinates, {
@@ -56,6 +67,7 @@ function buildRoadsFromStreets(streets: OsmStreet[]): FeatureCollection<LineStri
         name: s.name,
         highway: s.highway,
         fromOsm: true,
+        bridge: bridgeIds.has(s.id) || undefined,
       }),
     ),
   )
@@ -158,62 +170,8 @@ function extractBlocksFromStreets(
 ): Feature<Polygon>[] {
   const polygonized = polygonizeStreetBlocks(streets, boundary)
   if (polygonized.length >= 3) return polygonized
-
   const cellM = estimateBlockSpacingM(streets)
-  return gridBlocks(boundary, cellM, gridBearing)
-}
-
-function cellSizeMultiplier(gx: number, gy: number): number {
-  const hash = ((gx * 73856093) ^ (gy * 19349663)) >>> 0
-  return 0.58 + (hash % 72) / 100
-}
-
-function gridBlocks(
-  boundary: Feature<Polygon>,
-  cellM: number,
-  rotationDeg = 0,
-): Feature<Polygon>[] {
-  const centroid = turf.centroid(boundary)
-  const rotated = turf.transformRotate(boundary, -rotationDeg, { pivot: centroid })
-  const bbox = turf.bbox(rotated)
-  const [minX, minY, maxX, maxY] = bbox
-  const mPerDegLng = 111320 * Math.cos((centroid.geometry.coordinates[1] * Math.PI) / 180)
-
-  const cells: Feature<Polygon>[] = []
-  let gy = 0
-  let y = minY
-  while (y < maxY) {
-    const latMult = cellSizeMultiplier(0, gy)
-    const cellLat = (cellM * latMult) / 111320
-    let gx = 0
-    let x = minX
-    while (x < maxX) {
-      const lngMult = cellSizeMultiplier(gx, gy)
-      const cellLng = (cellM * lngMult) / mPerDegLng
-      try {
-        const cell = turf.bboxPolygon([x, y, x + cellLng, y + cellLat])
-        const clipped = turf.intersect(turf.featureCollection([cell, rotated]))
-        if (!clipped || clipped.geometry.type !== 'Polygon') {
-          x += cellLng
-          gx += 1
-          continue
-        }
-        const area = turf.area(clipped)
-        if (area >= 900 && area <= 220000) {
-          const world = turf.transformRotate(clipped, rotationDeg, { pivot: centroid }) as Feature<Polygon>
-          cells.push(world)
-        }
-      } catch {
-        // skip cell
-      }
-      x += cellLng
-      gx += 1
-    }
-    y += cellLat
-    gy += 1
-  }
-
-  return cells
+  return generateStyledBlocks(boundary, cellM, gridBearing, 'grid')
 }
 
 type LandUseParcel = 'commercial' | 'residential' | 'industrial'
@@ -317,25 +275,76 @@ function subdivideIntoFootprints(
   return footprints
 }
 
+/** Zoning no-build: rivers, rail, highways, arterials (all hardConstraintAreas). */
+function zoningForbidden(context: SiteContext): FeatureCollection<Polygon> {
+  if (context.hardConstraintAreas?.features.length) {
+    return context.hardConstraintAreas
+  }
+  return buildTransportForbiddenAreas(
+    context.waterways?.features ?? [],
+    context.railways?.features ?? [],
+  )
+}
+
+/**
+ * Crossing no-build for roads / bike / transit: river + rail only.
+ * (Highway/arterial pixels are existing roads — do not treat every arterial
+ * segment as a "crossing". Bridges/tunnels are rare exceptions over water/rail.)
+ */
+function crossingForbidden(context: SiteContext): FeatureCollection<Polygon> {
+  const features: Feature<Polygon>[] = []
+
+  const scan = context.basemapScan
+  if (scan?.rivers?.features?.length) features.push(...scan.rivers.features)
+  if (scan?.railways?.features?.length) features.push(...scan.railways.features)
+
+  // Fallback / supplement with vector river polygons + rail buffers
+  const vector = buildTransportForbiddenAreas(
+    context.waterways?.features ?? [],
+    context.railways?.features ?? [],
+  )
+  features.push(...vector.features)
+
+  if (features.length === 0 && context.hardConstraintAreas?.features.length) {
+    // Last resort: river/rail-kind cells from the full hard set
+    for (const f of context.hardConstraintAreas.features) {
+      const kind = String(f.properties?.kind ?? '')
+      if (kind === 'river' || kind === 'rail' || kind === 'railway') features.push(f)
+    }
+  }
+
+  return turf.featureCollection(features)
+}
+
 function buildDevelopableParcels(
   blocks: Feature<Polygon>[],
   context: SiteContext,
   boundary: Feature<Polygon>,
-): Array<{ parcel: Feature<Polygon>; area: number; dist: number }> {
+): Array<{ parcel: Feature<Polygon>; area: number; dist: number; waterDist: number }> {
   const centroid = turf.centroid(boundary)
+  const hard = zoningForbidden(context)
+  const waterways = context.waterways ?? turf.featureCollection([])
 
   const mapBlocks = (relaxed: boolean) =>
     blocks
       .map((block) => {
-        if (!relaxed && !isDevelopableBlock(block, context.buildings, context.preserveAreas)) return null
+        // Never relax hard infrastructure — water/rail/motorway/arterial stay non-developable
+        if (!isDevelopableBlock(block, context.buildings, context.preserveAreas, hard)) {
+          if (!relaxed) return null
+          // Relaxed mode may ignore building/preserve density, but still skip hard constraints
+          if (!isDevelopableBlock(block, turf.featureCollection([]), turf.featureCollection([]), hard)) {
+            return null
+          }
+        }
         const parcel = relaxed
-          ? block
-          : prepareDevelopableParcel(block, context.buildings, context.preserveAreas)
+          ? prepareDevelopableParcel(block, context.buildings, turf.featureCollection([]), hard)
+          : prepareDevelopableParcel(block, context.buildings, context.preserveAreas, hard)
         if (!parcel || turf.area(parcel) < 300) return null
         return {
           parcel,
           area: turf.area(parcel),
           dist: turf.distance(centroid, turf.centroid(parcel), { units: 'kilometers' }),
+          waterDist: distanceToWaterways(parcel, waterways),
         }
       })
       .filter((b): b is NonNullable<typeof b> => b !== null)
@@ -343,17 +352,7 @@ function buildDevelopableParcels(
 
   let developable = mapBlocks(false)
   if (developable.length < 3) developable = mapBlocks(true)
-  if (developable.length === 0 && blocks.length > 0) {
-    developable = blocks
-      .filter((b) => turf.area(b) > 500)
-      .map((parcel) => ({
-        parcel,
-        area: turf.area(parcel),
-        dist: turf.distance(centroid, turf.centroid(parcel), { units: 'kilometers' }),
-      }))
-      .sort((a, b) => b.area - a.area)
-      .slice(0, 20)
-  }
+  // No last-resort that ignores hard constraints — empty is better than building on the river
 
   return developable
 }
@@ -372,7 +371,18 @@ function classifyAndBuildLayers(
   green_space: Feature<Polygon>[]
   trees: Feature<Point>[]
 } {
-  const developable = buildDevelopableParcels(blocks, context, boundary)
+  const hasWater = (context.waterways?.features.length ?? 0) > 0
+  const waterfrontActive = intent.waterfront || hasWater
+  let developable = buildDevelopableParcels(blocks, context, boundary)
+
+  // Prefer waterfront parcels for parks / amenity edges
+  if (waterfrontActive) {
+    developable = [...developable].sort((a, b) => {
+      const waterDelta = a.waterDist - b.waterDist
+      if (Math.abs(waterDelta) > 0.05) return waterDelta
+      return b.area - a.area
+    })
+  }
 
   const commercial: Feature<Polygon>[] = []
   const residential: Feature<Polygon>[] = []
@@ -389,50 +399,95 @@ function classifyAndBuildLayers(
     ? Math.min(4, Math.max(2, Math.floor(developable.length * 0.14)))
     : Math.min(3, Math.max(1, Math.floor(developable.length * 0.1)))
 
-  const parkBase = intent.greenCity || intent.moreParks ? 0.2 : 0.12
-  const parkBoost = intent.moreParks ? 0.1 : 0
+  const parkBase = intent.greenCity || intent.moreParks || waterfrontActive ? 0.2 : 0.12
+  const parkBoost = intent.moreParks ? 0.1 : waterfrontActive ? 0.06 : 0
   const parkCount = Math.min(
-    intent.moreParks ? 8 : 5,
-    Math.max(intent.moreParks ? 3 : 1, Math.floor(developable.length * (parkBase + parkBoost))),
+    intent.moreParks || waterfrontActive ? 8 : 5,
+    Math.max(intent.moreParks || waterfrontActive ? 3 : 1, Math.floor(developable.length * (parkBase + parkBoost))),
   )
 
+  // When waterfront: assign nearest-to-water parcels as parks first, then commercial/industrial/resi from remaining
+  const parkIndices = new Set<number>()
+  if (waterfrontActive && developable.length > 0) {
+    const waterSorted = [...developable.entries()]
+      .sort(([, a], [, b]) => a.waterDist - b.waterDist)
+      .slice(0, parkCount)
+    for (const [idx] of waterSorted) parkIndices.add(idx)
+  }
+
+  let assignedCommercial = 0
+  let assignedIndustrial = 0
+  let assignedParks = 0
+
   developable.forEach((item, index) => {
-    if (index < commercialCount) {
+    if (parkIndices.has(index) || (!waterfrontActive && index >= commercialCount + industrialCount && index < commercialCount + industrialCount + parkCount)) {
+      if (assignedParks >= parkCount && !parkIndices.has(index)) {
+        // fall through to residential below
+      } else {
+        try {
+          const park = turf.buffer(item.parcel, -3, { units: 'meters', steps: 6 })
+          if (park && park.geometry.type === 'Polygon' && turf.area(park) > 400) {
+            park.properties = { landUse: 'park', impression: true, waterfront: waterfrontActive }
+            parks.push(park as Feature<Polygon>)
+            trees.push(...samplePointsAlongPolygonEdge(park as Feature<Polygon>, 16))
+            assignedParks++
+            return
+          }
+        } catch {
+          // skip
+        }
+      }
+    }
+
+    if (parkIndices.has(index)) {
+      // park buffer failed — treat as green easement
+      item.parcel.properties = { landUse: 'green', impression: true, waterfront: true }
+      green_space.push(item.parcel)
+      return
+    }
+
+    if (assignedCommercial < commercialCount) {
       commercial.push(...parcelToFootprints(item.parcel, 'commercial', intent, gridBearing))
+      assignedCommercial++
       return
     }
 
-    if (index < commercialCount + industrialCount) {
+    if (assignedIndustrial < industrialCount) {
       industrial.push(...parcelToFootprints(item.parcel, 'industrial', intent, gridBearing))
+      assignedIndustrial++
       return
     }
 
-    if (index < commercialCount + industrialCount + parkCount) {
+    if (!waterfrontActive && assignedParks < parkCount) {
       try {
         const park = turf.buffer(item.parcel, -3, { units: 'meters', steps: 6 })
         if (park && park.geometry.type === 'Polygon' && turf.area(park) > 400) {
           park.properties = { landUse: 'park', impression: true }
           parks.push(park as Feature<Polygon>)
           trees.push(...samplePointsAlongPolygonEdge(park as Feature<Polygon>, 16))
+          assignedParks++
+          return
         }
       } catch {
         // skip
       }
-      return
     }
 
     residential.push(...parcelToFootprints(item.parcel, 'residential', intent, gridBearing))
   })
 
   if (commercial.length === 0 && developable.length > 0) {
-    commercial.push(...parcelToFootprints(developable[0].parcel, 'commercial', intent, gridBearing))
+    const pick = developable.find((_, i) => !parkIndices.has(i)) ?? developable[0]
+    commercial.push(...parcelToFootprints(pick.parcel, 'commercial', intent, gridBearing))
   }
   if (residential.length === 0 && developable.length > 1) {
-    residential.push(...parcelToFootprints(developable[1].parcel, 'residential', intent, gridBearing))
+    const pick = developable.find((_, i) => !parkIndices.has(i) && i > 0) ?? developable[1]
+    residential.push(...parcelToFootprints(pick.parcel, 'residential', intent, gridBearing))
   }
 
   if (industrial.length === 0 && developable.length > 2) {
-    industrial.push(...parcelToFootprints(developable[2].parcel, 'industrial', intent, gridBearing))
+    const pick = developable.find((_, i) => !parkIndices.has(i) && i > 1) ?? developable[2]
+    industrial.push(...parcelToFootprints(pick.parcel, 'industrial', intent, gridBearing))
   }
 
   for (const preserve of context.preserveAreas.features.slice(0, 3)) {
@@ -448,43 +503,96 @@ function classifyAndBuildLayers(
     }
   }
 
-  return { commercial, residential, industrial, parks, green_space, trees }
+  // Hard-constraint buffers stay as map overlays only — do not style as green_space parks
+  const hard = zoningForbidden(context)
+
+  return {
+    commercial: filterFootprintsOffConstraints(commercial, hard),
+    residential: filterFootprintsOffConstraints(residential, hard),
+    industrial: filterFootprintsOffConstraints(industrial, hard),
+    parks: filterFootprintsOffConstraints(parks, hard),
+    green_space: filterFootprintsOffConstraints(green_space, hard),
+    trees,
+  }
 }
 
-function buildBikeAndTransit(streets: OsmStreet[]): {
+function buildBikeAndTransit(
+  streets: OsmStreet[],
+  crossingZones: FeatureCollection<Polygon>,
+  bridgeIds: Set<string>,
+): {
   bike_paths: FeatureCollection<LineString>
   transit: FeatureCollection<LineString>
 } {
-  const major = new Set(['primary', 'secondary', 'tertiary', 'trunk', 'motorway'])
+  const major = new Set(['primary', 'secondary', 'tertiary', 'trunk'])
   const bikeHighways = new Set([
     'residential', 'living_street', 'tertiary', 'secondary', 'cycleway', 'path',
     'unclassified', 'service', 'primary', 'primary_link',
   ])
 
-  const bikeStreets = streets.filter((s) => bikeHighways.has(s.highway))
-  const transitStreets = streets.filter((s) => major.has(s.highway))
+  // Never skip obstacle checks — only explicit bridgeIds may cross river/rail
+  const avoidsObstacles = (s: OsmStreet) => {
+    if (bridgeIds.has(s.id)) return true
+    return !lineCrossesForbidden(turf.lineString(s.coordinates), crossingZones)
+  }
+
+  const bikeStreets = streets
+    .filter((s) => bikeHighways.has(s.highway) && avoidsObstacles(s))
+    // Bike: at most one intentional bridge crossing
+    .filter((s) => !bridgeIds.has(s.id) || [...bridgeIds][0] === s.id)
+
+  const transitBridgeId = [...bridgeIds][0]
+  const transitStreets = streets.filter((s) => {
+    if (!major.has(s.highway)) return false
+    if (bridgeIds.has(s.id)) return s.id === transitBridgeId
+    return avoidsObstacles(s)
+  })
 
   return {
     bike_paths: turf.featureCollection(
       bikeStreets.map((s) =>
-        turf.lineString(s.coordinates, { type: 'bike', class: 'protected', snappedTo: s.name, fromOsm: true }),
+        turf.lineString(s.coordinates, {
+          type: 'bike',
+          class: 'protected',
+          snappedTo: s.name,
+          fromOsm: true,
+          bridge: bridgeIds.has(s.id) || undefined,
+        }),
       ),
     ),
     transit: turf.featureCollection(
       transitStreets.map((s) =>
-        turf.lineString(s.coordinates, { type: 'transit', mode: 'brt', snappedTo: s.name, fromOsm: true }),
+        turf.lineString(s.coordinates, {
+          type: 'transit',
+          mode: 'brt',
+          snappedTo: s.name,
+          fromOsm: true,
+          bridge: bridgeIds.has(s.id) || undefined,
+        }),
       ),
     ),
   }
 }
 
-export function buildTransportLayers(streets: OsmStreet[]): Pick<MasterPlanLayers, 'roads' | 'bike_paths' | 'transit'> {
-  const { bike_paths, transit } = buildBikeAndTransit(streets)
-  return {
-    roads: buildRoadsFromStreets(streets),
-    bike_paths,
-    transit,
-  }
+export function buildTransportLayers(
+  streets: OsmStreet[],
+  context: SiteContext,
+  _boundary: Feature<Polygon>,
+): Pick<MasterPlanLayers, 'roads' | 'bike_paths' | 'transit'> {
+  const crossing = crossingForbidden(context)
+
+  // Up to 3 road bridges/tunnels over river or rail — realistic, not a web of crossings
+  const { kept, bridgeIds } = filterStreetsAllowingBridges(
+    streets,
+    crossing,
+    () => false,
+    3,
+  )
+
+  const { bike_paths, transit } = buildBikeAndTransit(kept, crossing, bridgeIds)
+  const roads = buildRoadsFromStreets(kept, crossing, bridgeIds)
+
+  return { roads, bike_paths, transit }
 }
 
 function classifyFallbackRoadClass(lengthM: number, percentile: number): RoadClass {
@@ -519,6 +627,7 @@ function extendTransitLines(
 
 function buildFallbackTransport(
   blocks: Feature<Polygon>[],
+  forbidden: FeatureCollection<Polygon>,
 ): Pick<MasterPlanLayers, 'roads' | 'bike_paths' | 'transit'> {
   const seen = new Set<string>()
   const segments: Feature<LineString>[] = []
@@ -533,12 +642,14 @@ function buildFallbackTransport(
       if (seen.has(key)) continue
       seen.add(key)
       const lengthM = turf.distance(a, b, { units: 'kilometers' }) * 1000
-      segments.push(turf.lineString([a, b], {
+      const seg = turf.lineString([a, b], {
         type: 'road',
         class: 'local',
         fallbackGrid: true,
         lengthM,
-      }))
+      })
+      if (lineCrossesForbidden(seg, forbidden)) continue
+      segments.push(seg)
     }
   }
 
@@ -599,51 +710,96 @@ export function buildOsmMasterPlan(
   const gridBearing = computeStreetGridRotation(context.streets, boundary)
   const blocks = extractBlocksFromStreets(context.streets, boundary, gridBearing)
   const classified = classifyAndBuildLayers(blocks, context, boundary, intent, gridBearing)
+  const crossing = crossingForbidden(context)
+  const hard = zoningForbidden(context)
   const transport = context.streets.length > 0
-    ? buildTransportLayers(context.streets)
-    : buildFallbackTransport(blocks)
+    ? buildTransportLayers(context.streets, context, boundary)
+    : buildFallbackTransport(blocks, crossing)
 
   let transit = transport.transit
   if (intent.longerTransit || intent.transit) {
     transit = extendTransitLines(transit, intent.longerTransit ? 1.85 : 1.45)
+    transit = turf.featureCollection(
+      transit.features.filter((f) => {
+        if (f.properties?.bridge) return true
+        return !lineCrossesForbidden(f, crossing)
+      }),
+    )
   }
+
+  // Final pass: drop any bike path that still crosses river/rail (except 1 bridge)
+  let bike_paths = turf.featureCollection(
+    transport.bike_paths.features.filter((f) => {
+      if (f.properties?.bridge) return true
+      return !lineCrossesForbidden(f, crossing)
+    }),
+  )
+
+  let roads = turf.featureCollection(
+    transport.roads.features.filter((f) => {
+      if (f.properties?.bridge) return true
+      // Existing hard highways that merely follow their own corridor stay;
+      // anything else must not cut through river/rail.
+      const hw = String(f.properties?.highway ?? '')
+      if (HARD_HIGHWAYS.has(hw) && !lineCrossesForbidden(f, crossing)) return true
+      return !lineCrossesForbidden(f, crossing)
+    }),
+  )
 
   const parkFeatures: Array<Feature<Polygon> | Feature<Point>> = [
     ...classified.parks,
     ...classified.trees,
   ]
 
-  let commercial = classified.commercial
-  let residential = classified.residential
-  let industrial = classified.industrial
+  let commercial = filterFootprintsOffConstraints(classified.commercial, hard)
+  let residential = filterFootprintsOffConstraints(classified.residential, hard)
+  let industrial = filterFootprintsOffConstraints(classified.industrial, hard)
 
+  // Last-resort fill only from hard-constraint-safe blocks
   if (commercial.length === 0 && residential.length === 0 && blocks.length > 0) {
     const fallbackBlocks = blocks
       .filter((b) => turf.area(b) > 800)
+      .filter((b) => isDevelopableBlock(b, context.buildings, context.preserveAreas, hard))
       .sort((a, b) => turf.area(b) - turf.area(a))
       .slice(0, 16)
-    commercial = fallbackBlocks.slice(0, Math.min(4, fallbackBlocks.length)).map((parcel) => {
-      parcel.properties = { landUse: 'commercial', impression: true, height: 'mid' }
-      return parcel
-    })
-    industrial = fallbackBlocks.slice(commercial.length, commercial.length + 2).map((parcel) => {
-      parcel.properties = { landUse: 'industrial', impression: true, height: 'warehouse' }
-      return parcel
-    })
-    residential = fallbackBlocks.slice(commercial.length + industrial.length).map((parcel) => {
-      parcel.properties = { landUse: 'residential', impression: true, height: 'low' }
-      return parcel
-    })
+    commercial = filterFootprintsOffConstraints(
+      fallbackBlocks.slice(0, Math.min(4, fallbackBlocks.length)).map((parcel) => {
+        const copy = turf.clone(parcel)
+        copy.properties = { landUse: 'commercial', impression: true, height: 'mid' }
+        return copy
+      }),
+      hard,
+    )
+    industrial = filterFootprintsOffConstraints(
+      fallbackBlocks.slice(commercial.length, commercial.length + 2).map((parcel) => {
+        const copy = turf.clone(parcel)
+        copy.properties = { landUse: 'industrial', impression: true, height: 'warehouse' }
+        return copy
+      }),
+      hard,
+    )
+    residential = filterFootprintsOffConstraints(
+      fallbackBlocks.slice(commercial.length + industrial.length).map((parcel) => {
+        const copy = turf.clone(parcel)
+        copy.properties = { landUse: 'residential', impression: true, height: 'low' }
+        return copy
+      }),
+      hard,
+    )
   }
 
-  const schoolCoord = pointOnDevelopableLand(boundary, context.buildings, context.preserveAreas)
-  let hospitalCoord = pointOnDevelopableLand(boundary, context.buildings, context.preserveAreas)
+  const schoolCoord = pointOnDevelopableLand(boundary, context.buildings, context.preserveAreas, hard)
+  let hospitalCoord = pointOnDevelopableLand(boundary, context.buildings, context.preserveAreas, hard)
   if (
     schoolCoord &&
     hospitalCoord &&
     turf.distance(schoolCoord, hospitalCoord, { units: 'kilometers' }) < 0.2
   ) {
     hospitalCoord = turf.destination(turf.point(schoolCoord), 0.28, 95, { units: 'kilometers' }).geometry.coordinates
+    const hardIndex = getConstraintIndex(hard)
+    if (hardIndex.containsPoint(hospitalCoord[0], hospitalCoord[1])) {
+      hospitalCoord = pointOnDevelopableLand(boundary, context.buildings, context.preserveAreas, hard)
+    }
   }
   const centroid = turf.centroid(boundary)
 
@@ -651,14 +807,16 @@ export function buildOsmMasterPlan(
   const hospitalCampus = hospitalCoord ? buildHospitalCampus(hospitalCoord, gridBearing) : null
 
   return {
-    roads: transport.roads,
-    bike_paths: transport.bike_paths,
+    roads,
+    bike_paths,
     transit,
     commercial: turf.featureCollection(commercial),
     residential: turf.featureCollection(residential),
     industrial: turf.featureCollection(industrial),
     parks: { type: 'FeatureCollection', features: parkFeatures } as FeatureCollection<Polygon | Point>,
-    green_space: turf.featureCollection(classified.green_space),
+    green_space: turf.featureCollection(
+      filterFootprintsOffConstraints(classified.green_space, hard),
+    ),
     schools: turf.featureCollection(schoolCampus ? [schoolCampus] : []),
     hospitals: turf.featureCollection(hospitalCampus ? [hospitalCampus] : []),
     annotations: [
@@ -666,6 +824,11 @@ export function buildOsmMasterPlan(
         id: uuid(),
         text: intent.cbd ? 'CBD core' : 'Civic centre',
         coordinates: centroid.geometry.coordinates,
+      },
+      {
+        id: uuid(),
+        text: 'Regular street grid',
+        coordinates: turf.destination(centroid, 0.12, 45, { units: 'kilometers' }).geometry.coordinates,
       },
     ],
   }
