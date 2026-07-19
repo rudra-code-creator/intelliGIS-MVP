@@ -28,9 +28,7 @@
 
 ## Cursor Cloud specific instructions
 
-- Node 22 is available and works with Next.js 16; no version manager setup needed. Deps install via `npm install` (run automatically by the startup update script).
-- Standard commands live in `package.json`: `npm run dev` (dev server on port 3000), `npm run build`, `npm run lint`. Start the dev server yourself when testing (it is not started by the update script).
-- No database, auth, or external services are required to run or demo the app.
-- AI provider auto-detects from env: `NVIDIA_API_KEY` → `OPENAI_API_KEY` → mock. With no key set it falls back to the mock provider, which fully works for the demo (top-nav badge shows "Mock data"). To use real AI, add keys to `.env.local` (see `.env.example`); env changes require a dev server restart.
-- Hello-world/demo flow: open `/`, click "Launch App" → on `/planner` click "Use Sample Area" → pick a preset (e.g. "Transit Oriented") or type a prompt → "Generate Master Plan". Colored land-use layers render on the map with a summary/metrics panel and construction timeline.
-- Pre-existing `npm run lint` reports 2 errors and several warnings in the current tree; these are unrelated to environment setup.
+- Single Next.js service; standard commands live in `package.json` (`npm run dev`, `npm run build`, `npm run lint`). Dev server runs on `http://localhost:3000`.
+- No API key is required to run or demo the app: with no `AI_PROVIDER`/`NVIDIA_API_KEY`/`OPENAI_API_KEY` set, the API routes fall back to the mock provider and every flow (generate master plan, metrics, timeline) works fully. To exercise real AI, set keys in `.env.local` per `README.md`.
+- Hello-world / smoke check: POST to `/api/generate` with `{ prompt, boundary }` (a GeoJSON Polygon Feature) returns plan layers, or use the UI: Launch App → Use Sample Area → pick a preset → Generate Master Plan.
+- `npm run lint` currently reports 2 pre-existing errors (`chat-completion.ts` prefer-const, `MapCanvas` ref-during-render) plus warnings. These are pre-existing code issues, not environment problems.
