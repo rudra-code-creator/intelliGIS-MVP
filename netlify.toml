@@ -1,0 +1,16 @@
+[build]
+  command = "npm run build"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+# Explicitly enable the Next.js OpenNext runtime.
+# Without this, some Git-based builds skip the adapter and publish with
+# zero functions — which produces Netlify's default "Page not found" 404.
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+# Set AI keys in Netlify UI → Project configuration → Environment variables:
+#   AI_PROVIDER=nvidia
+#   NVIDIA_API_KEY=nvapi-...
+#   NVIDIA_MODEL=z-ai/glm-5.2

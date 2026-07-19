@@ -25,6 +25,7 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@netlify/plugin-nextjs": "^5.15.12",
     "@tailwindcss/postcss": "^4.3.2",
     "@types/geojson": "^7946.0.16",
     "@types/node": "^26.1.1",
