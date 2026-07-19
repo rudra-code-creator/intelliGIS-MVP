@@ -49,6 +49,7 @@ interface PlannerState {
   siteContext: SiteContext | null
   showOsmStreets: boolean
   showOsmBuildings: boolean
+  showHardConstraints: boolean
   editHistory: MasterPlanResult[]
   editHistoryIndex: number
   isLoadingOsm: boolean
@@ -68,6 +69,7 @@ interface PlannerState {
   setSiteContext: (ctx: SiteContext | null) => void
   toggleOsmStreets: () => void
   toggleOsmBuildings: () => void
+  toggleHardConstraints: () => void
   setIsLoadingOsm: (loading: boolean) => void
   startGeneration: () => void
   startRefinement: () => void
@@ -129,6 +131,7 @@ export const usePlannerStore = create<PlannerState>((set, get) => ({
   siteContext: null,
   showOsmStreets: true,
   showOsmBuildings: true,
+  showHardConstraints: true,
   editHistory: [],
   editHistoryIndex: -1,
   isLoadingOsm: false,
@@ -180,6 +183,7 @@ export const usePlannerStore = create<PlannerState>((set, get) => ({
   setSiteContext: (ctx) => set({ siteContext: ctx }),
   toggleOsmStreets: () => set((s) => ({ showOsmStreets: !s.showOsmStreets })),
   toggleOsmBuildings: () => set((s) => ({ showOsmBuildings: !s.showOsmBuildings })),
+  toggleHardConstraints: () => set((s) => ({ showHardConstraints: !s.showHardConstraints })),
   setIsLoadingOsm: (loading) => set({ isLoadingOsm: loading }),
   startGeneration: () =>
     set({

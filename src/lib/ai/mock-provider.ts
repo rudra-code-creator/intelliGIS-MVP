@@ -1,7 +1,7 @@
 import type { AIProvider } from '@/lib/ai/types'
 import type { GenerateRequest } from '@/types/master-plan'
 import { generateMockMasterPlan } from '@/utils/mock-generator'
-import { finalizeMasterPlan } from '@/utils/plan-finalize'
+import { finalizeMasterPlan } from '@/utils/plan-finalize-server'
 import { PROVIDER_LABELS } from '@/types/provider'
 
 export class MockProvider implements AIProvider {

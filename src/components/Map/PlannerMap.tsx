@@ -9,7 +9,7 @@ import type { MapTool } from '@/store/planner-store'
 import { usePlannerStore } from '@/store/planner-store'
 import { BRISBANE_CENTER } from '@/types/master-plan'
 import { isLayerSourceVisible, LAYER_ID_TO_SOURCE } from '@/utils/layer-map'
-import { streetsToFeatureCollection } from '@/utils/osm-context'
+import { HARD_HIGHWAYS, SOFT_KEEP_HIGHWAYS, streetsToFeatureCollection } from '@/utils/osm-context'
 import { buildTransportLayers } from '@/utils/osm-master-plan'
 import { applyOsmGeometryToPlan } from '@/utils/plan-finalize'
 import { MapToolbar } from '@/components/Map/MapToolbar'
@@ -119,6 +119,7 @@ export function PlannerMap() {
   const siteContext = usePlannerStore((s) => s.siteContext)
   const showOsmStreets = usePlannerStore((s) => s.showOsmStreets)
   const showOsmBuildings = usePlannerStore((s) => s.showOsmBuildings)
+  const showHardConstraints = usePlannerStore((s) => s.showHardConstraints)
   const setSiteContext = usePlannerStore((s) => s.setSiteContext)
   const setIsLoadingOsm = usePlannerStore((s) => s.setIsLoadingOsm)
   const updateMasterPlan = usePlannerStore((s) => s.updateMasterPlan)
@@ -308,13 +309,23 @@ export function PlannerMap() {
 
     let cancelled = false
     setIsLoadingOsm(true)
-    fetch('/api/osm-context', {
+    fetch('/api/site-constraints', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ boundary }),
     })
-      .then((r) => r.json())
-      .then((ctx) => { if (!cancelled) setSiteContext(ctx) })
+      .then(async (r) => {
+        if (!r.ok) throw new Error(`site-constraints ${r.status}`)
+        return r.json()
+      })
+      .then((ctx) => {
+        if (cancelled) return
+        if (ctx && Array.isArray(ctx.streets) && typeof ctx.summaryText === 'string') {
+          setSiteContext(ctx)
+        } else {
+          setSiteContext(null)
+        }
+      })
       .catch(() => { if (!cancelled) setSiteContext(null) })
       .finally(() => { if (!cancelled) setIsLoadingOsm(false) })
 
@@ -341,7 +352,7 @@ export function PlannerMap() {
     })
   }, [])
 
-  const updateOsmContextLayers = useCallback((map: maplibregl.Map) => {
+  const updateSoftOsmLayers = useCallback((map: maplibregl.Map) => {
     ;['osm-streets-layer', 'osm-buildings-layer', 'osm-preserve-layer'].forEach((id) => {
       if (map.getLayer(id)) map.removeLayer(id)
     })
@@ -394,6 +405,191 @@ export function PlannerMap() {
     }
   }, [siteContext, showOsmStreets, showOsmBuildings, masterPlan])
 
+  const updateHardConstraintLayers = useCallback((map: maplibregl.Map) => {
+    ;[
+      'basemap-river-layer',
+      'basemap-highway-layer',
+      'basemap-arterial-layer',
+      'basemap-rail-layer',
+      'osm-hard-buffer-layer',
+      'osm-water-fill-layer',
+      'osm-water-line-layer',
+      'osm-rail-layer',
+      'osm-hard-highway-layer',
+      'osm-arterial-layer',
+    ].forEach((id) => {
+      if (map.getLayer(id)) map.removeLayer(id)
+    })
+    ;[
+      'basemap-river',
+      'basemap-highway',
+      'basemap-arterial',
+      'basemap-rail',
+      'osm-hard-buffer',
+      'osm-water',
+      'osm-rail',
+      'osm-hard-highway',
+      'osm-arterial',
+    ].forEach((id) => {
+      if (map.getSource(id)) map.removeSource(id)
+    })
+
+    if (!siteContext || !showHardConstraints) return
+
+    const scan = siteContext.basemapScan
+    if (scan) {
+      if (scan.rivers.features.length > 0) {
+        map.addSource('basemap-river', { type: 'geojson', data: scan.rivers })
+        map.addLayer({
+          id: 'basemap-river-layer',
+          type: 'fill',
+          source: 'basemap-river',
+          paint: { 'fill-color': IMPRESSION.water, 'fill-opacity': 0.42 },
+        })
+      }
+      if (scan.highways.features.length > 0) {
+        map.addSource('basemap-highway', { type: 'geojson', data: scan.highways })
+        map.addLayer({
+          id: 'basemap-highway-layer',
+          type: 'fill',
+          source: 'basemap-highway',
+          paint: { 'fill-color': '#dc2626', 'fill-opacity': 0.55 },
+        })
+      }
+      if (scan.arterials.features.length > 0) {
+        map.addSource('basemap-arterial', { type: 'geojson', data: scan.arterials })
+        map.addLayer({
+          id: 'basemap-arterial-layer',
+          type: 'fill',
+          source: 'basemap-arterial',
+          paint: {
+            'fill-color': [
+              'match',
+              ['get', 'shade'],
+              'yellow',
+              '#fbbf24',
+              'dark-orange',
+              '#ea580c',
+              '#f59e0b',
+            ],
+            'fill-opacity': 0.5,
+          },
+        })
+      }
+      if (scan.railways.features.length > 0) {
+        map.addSource('basemap-rail', { type: 'geojson', data: scan.railways })
+        map.addLayer({
+          id: 'basemap-rail-layer',
+          type: 'fill',
+          source: 'basemap-rail',
+          paint: { 'fill-color': IMPRESSION.railway, 'fill-opacity': 0.5 },
+        })
+      }
+    }
+
+    const buffers = siteContext.hardConstraintAreas?.features ?? []
+    if (buffers.length > 0) {
+      map.addSource('osm-hard-buffer', {
+        type: 'geojson',
+        data: siteContext.hardConstraintAreas,
+      })
+      map.addLayer({
+        id: 'osm-hard-buffer-layer',
+        type: 'fill',
+        source: 'osm-hard-buffer',
+        paint: {
+          'fill-color': IMPRESSION.water,
+          'fill-opacity': 0.18,
+          'fill-outline-color': IMPRESSION.railway,
+        },
+      })
+    }
+
+    const waterways = siteContext.waterways?.features ?? []
+    if (waterways.length > 0) {
+      map.addSource('osm-water', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: waterways },
+      })
+      map.addLayer({
+        id: 'osm-water-fill-layer',
+        type: 'fill',
+        source: 'osm-water',
+        filter: ['==', ['geometry-type'], 'Polygon'],
+        paint: { 'fill-color': IMPRESSION.water, 'fill-opacity': 0.55 },
+      })
+      map.addLayer({
+        id: 'osm-water-line-layer',
+        type: 'line',
+        source: 'osm-water',
+        filter: ['==', ['geometry-type'], 'LineString'],
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: {
+          'line-color': IMPRESSION.water,
+          'line-width': 3.5,
+          'line-opacity': 0.95,
+        },
+      })
+    }
+
+    const railways = siteContext.railways?.features ?? []
+    if (railways.length > 0) {
+      map.addSource('osm-rail', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: railways },
+      })
+      map.addLayer({
+        id: 'osm-rail-layer',
+        type: 'line',
+        source: 'osm-rail',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: {
+          'line-color': IMPRESSION.railway,
+          'line-width': 2.5,
+          'line-opacity': 0.95,
+        },
+      })
+    }
+
+    const hardCorridors = siteContext.hardCorridors?.features?.length
+      ? siteContext.hardCorridors
+      : streetsToFeatureCollection(
+          siteContext.streets.filter((s) => HARD_HIGHWAYS.has(s.highway)),
+        )
+    if (hardCorridors.features.length > 0) {
+      map.addSource('osm-hard-highway', { type: 'geojson', data: hardCorridors })
+      map.addLayer({
+        id: 'osm-hard-highway-layer',
+        type: 'line',
+        source: 'osm-hard-highway',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: {
+          'line-color': IMPRESSION.hardHighway,
+          'line-width': 4,
+          'line-opacity': 0.95,
+        },
+      })
+    }
+
+    const arterials = streetsToFeatureCollection(
+      siteContext.streets.filter((s) => SOFT_KEEP_HIGHWAYS.has(s.highway)),
+    )
+    if (arterials.features.length > 0) {
+      map.addSource('osm-arterial', { type: 'geojson', data: arterials })
+      map.addLayer({
+        id: 'osm-arterial-layer',
+        type: 'line',
+        source: 'osm-arterial',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: {
+          'line-color': IMPRESSION.arterial,
+          'line-width': 2.5,
+          'line-opacity': 0.9,
+        },
+      })
+    }
+  }, [siteContext, showHardConstraints])
+
   const removePlanLayerArtifacts = (map: maplibregl.Map, key: string) => {
     ;[
       `${key}-layer`,
@@ -428,11 +624,15 @@ export function PlannerMap() {
     const planLayers = { ...masterPlan.layers }
     if (
       siteContext?.streets?.length &&
+      boundary &&
       (planLayers.roads.features.length === 0 ||
         planLayers.bike_paths.features.length === 0 ||
         planLayers.transit.features.length === 0)
     ) {
-      Object.assign(planLayers, buildTransportLayers(siteContext.streets))
+      Object.assign(
+        planLayers,
+        buildTransportLayers(siteContext.streets, siteContext, boundary),
+      )
     }
 
     const addBuildingLayer = (key: 'commercial' | 'residential' | 'industrial', fill: string) => {
@@ -731,7 +931,7 @@ export function PlannerMap() {
         },
       })
     }
-  }, [masterPlan, layers, animatedLayerIds, showAllLayers, siteContext])
+  }, [masterPlan, layers, animatedLayerIds, showAllLayers, siteContext, boundary])
 
   useEffect(() => {
     const map = mapRef.current
@@ -742,9 +942,11 @@ export function PlannerMap() {
   useEffect(() => {
     const map = mapRef.current
     if (!map || !mapReady) return
-    updateOsmContextLayers(map)
+    // Soft OSM under plan; hard constraints always on top so demos can see them
+    updateSoftOsmLayers(map)
     updatePlanLayers(map)
-  }, [mapReady, masterPlan, siteContext, updatePlanLayers, updateOsmContextLayers])
+    updateHardConstraintLayers(map)
+  }, [mapReady, masterPlan, siteContext, updatePlanLayers, updateSoftOsmLayers, updateHardConstraintLayers])
 
   useEffect(() => {
     if (!masterPlan || !boundary || !siteContext) return

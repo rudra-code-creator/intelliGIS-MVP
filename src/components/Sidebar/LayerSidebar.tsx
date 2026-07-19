@@ -11,9 +11,11 @@ import {
   Trash2,
   Building2,
   Route,
+  Waves,
 } from 'lucide-react'
 import type { LayerId } from '@/types/master-plan'
 import { cn } from '@/lib/utils'
+import { IMPRESSION } from '@/lib/impression-styles'
 
 function featureCount(layerId: LayerId, masterPlan: ReturnType<typeof usePlannerStore.getState>['masterPlan']): number {
   if (!masterPlan) return 0
@@ -37,12 +39,19 @@ export function LayerSidebar() {
   const layerLocks = usePlannerStore((s) => s.layerLocks)
   const showOsmStreets = usePlannerStore((s) => s.showOsmStreets)
   const showOsmBuildings = usePlannerStore((s) => s.showOsmBuildings)
+  const showHardConstraints = usePlannerStore((s) => s.showHardConstraints)
   const toggleOsmStreets = usePlannerStore((s) => s.toggleOsmStreets)
   const toggleOsmBuildings = usePlannerStore((s) => s.toggleOsmBuildings)
+  const toggleHardConstraints = usePlannerStore((s) => s.toggleHardConstraints)
   const siteContext = usePlannerStore((s) => s.siteContext)
   const isLoadingOsm = usePlannerStore((s) => s.isLoadingOsm)
 
   const editableLayers = layers.filter((l) => l.id !== 'master-plan')
+
+  const hardCount =
+    (siteContext?.waterways?.features.length ?? 0) +
+    (siteContext?.railways?.features.length ?? 0) +
+    (siteContext?.hardCorridors?.features.length ?? 0)
 
   return (
     <div className="flex h-full flex-col">
@@ -78,7 +87,27 @@ export function LayerSidebar() {
             loading={isLoadingOsm}
             onToggle={toggleOsmBuildings}
           />
+          <ContextToggle
+            icon={Waves}
+            label="Hard constraints"
+            count={hardCount || undefined}
+            visible={showHardConstraints}
+            loading={isLoadingOsm}
+            onToggle={toggleHardConstraints}
+            swatches={[IMPRESSION.water, IMPRESSION.railway, IMPRESSION.hardHighway, IMPRESSION.arterial]}
+          />
         </div>
+        {showHardConstraints && siteContext && (
+          <p className="mt-1.5 px-2 text-[10px] leading-relaxed text-zinc-600">
+            <span style={{ color: IMPRESSION.water }}>Rivers</span>
+            {' · '}
+            <span style={{ color: IMPRESSION.railway }}>Rail</span>
+            {' · '}
+            <span style={{ color: IMPRESSION.hardHighway }}>Highway</span>
+            {' · '}
+            <span style={{ color: IMPRESSION.arterial }}>Arterial</span>
+          </p>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
@@ -168,6 +197,7 @@ function ContextToggle({
   visible,
   loading,
   onToggle,
+  swatches,
 }: {
   icon: typeof Route
   label: string
@@ -175,6 +205,7 @@ function ContextToggle({
   visible: boolean
   loading: boolean
   onToggle: () => void
+  swatches?: string[]
 }) {
   return (
     <button
@@ -187,6 +218,13 @@ function ContextToggle({
     >
       <Icon className="h-3.5 w-3.5 shrink-0" />
       <span className="flex-1">{label}</span>
+      {swatches && visible && (
+        <span className="flex gap-0.5">
+          {swatches.map((c) => (
+            <span key={c} className="h-2 w-2 rounded-sm" style={{ backgroundColor: c }} />
+          ))}
+        </span>
+      )}
       {loading ? (
         <span className="text-zinc-600">…</span>
       ) : (
