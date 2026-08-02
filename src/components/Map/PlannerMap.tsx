@@ -790,8 +790,8 @@ export function PlannerMap() {
       }
     }
 
-    addGreenLayer('parks', IMPRESSION.park, true)
-    addGreenLayer('green_space', IMPRESSION.preserve, false)
+    addGreenLayer('parks', layerColors.parks ?? IMPRESSION.park, true)
+    addGreenLayer('green_space', layerColors['green-space'] ?? IMPRESSION.preserve, false)
 
     ;(['schools', 'hospitals'] as const).forEach((key) => {
       if (!isLayerSourceVisible(key, layerVisibility)) return
