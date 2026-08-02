@@ -181,9 +181,15 @@ export function adaptMasterPlanAroundArterial(
   const residential = filterFootprintsOutsideCorridor(plan.layers.residential, corridorPoly)
   const commercial = [
     ...filterFootprintsOutsideCorridor(plan.layers.commercial, corridorPoly),
-    ...commercialFrontageAlongArterial(arterial, boundary, corridorPoly),
+    ...commercialFrontageAlongArterial(arterial, boundary, corridorPoly).map((f) => {
+      // Add a plausible heightM for corridor frontage commercial buildings
+      f.properties = { ...f.properties, heightM: 24 }
+      return f
+    }),
   ]
   const industrial = filterFootprintsOutsideCorridor(plan.layers.industrial, corridorPoly)
+  const office = filterFootprintsOutsideCorridor(plan.layers.office, corridorPoly)
+  const public_squares = filterFootprintsOutsideCorridor(plan.layers.public_squares, corridorPoly)
 
   const spurs = collectorSpurs(arterial, boundary)
   const manualRoads = enrichRoadCollection(
@@ -234,6 +240,8 @@ export function adaptMasterPlanAroundArterial(
       bike_paths,
       residential: turf.featureCollection(residential),
       commercial: turf.featureCollection(commercial),
+      office: turf.featureCollection(office),
+      public_squares: turf.featureCollection(public_squares),
       industrial: turf.featureCollection(industrial),
       annotations,
     },

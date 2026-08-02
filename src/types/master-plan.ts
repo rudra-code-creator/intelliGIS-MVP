@@ -13,6 +13,8 @@ export type LayerId =
   | 'parks'
   | 'residential'
   | 'commercial'
+  | 'office'
+  | 'public-square'
   | 'industrial'
   | 'transit'
   | 'bike-network'
@@ -41,6 +43,8 @@ export interface MasterPlanLayers {
   parks: FeatureCollection<Polygon | Point>
   residential: FeatureCollection<Polygon>
   commercial: FeatureCollection<Polygon>
+  office: FeatureCollection<Polygon>
+  public_squares: FeatureCollection<Polygon>
   industrial: FeatureCollection<Polygon>
   bike_paths: FeatureCollection<LineString>
   transit: FeatureCollection<LineString>
@@ -108,6 +112,8 @@ export const DEFAULT_LAYERS: LayerConfig[] = [
   { id: 'parks', label: 'Parks', color: '#22c55e', visible: true, geometryType: 'polygon' },
   { id: 'residential', label: 'Residential', color: '#facc15', visible: true, geometryType: 'polygon' },
   { id: 'commercial', label: 'Commercial', color: '#3b82f6', visible: true, geometryType: 'polygon' },
+  { id: 'public-square', label: 'Public Squares', color: '#a78bfa', visible: true, geometryType: 'polygon' },
+  { id: 'office', label: 'Office', color: '#00b8a0', visible: true, geometryType: 'polygon' },
   { id: 'industrial', label: 'Industrial', color: '#6b7280', visible: true, geometryType: 'polygon' },
   { id: 'transit', label: 'Transit', color: '#ef4444', visible: true, geometryType: 'line' },
   { id: 'bike-network', label: 'Bike Network', color: '#f97316', visible: true, geometryType: 'line' },

@@ -15,6 +15,7 @@ import { applyOsmGeometryToPlan } from '@/utils/plan-finalize'
 import { MapToolbar } from '@/components/Map/MapToolbar'
 import { useAdaptAroundArterial } from '@/hooks/useAdaptAroundArterial'
 import { BRAND } from '@/lib/brand'
+import { buildingHeightExpression, buildingBaseExpression, EXISTING_BUILDING_HEIGHT_M } from '@/utils/building-heights'
 import { IMPRESSION } from '@/lib/impression-styles'
 
 const OSM_STYLE = {
@@ -31,7 +32,7 @@ const OSM_STYLE = {
 }
 
 const PLAN_LAYER_KEYS = [
-  'green_space', 'parks', 'residential', 'commercial', 'industrial',
+  'green_space', 'parks', 'public_squares', 'residential', 'commercial', 'office', 'industrial',
   'roads', 'bike_paths', 'transit', 'schools', 'hospitals',
 ] as const
 
@@ -120,6 +121,7 @@ export function PlannerMap() {
   const showOsmStreets = usePlannerStore((s) => s.showOsmStreets)
   const showOsmBuildings = usePlannerStore((s) => s.showOsmBuildings)
   const showHardConstraints = usePlannerStore((s) => s.showHardConstraints)
+  const massing3d = usePlannerStore((s) => s.massing3d)
   const setSiteContext = usePlannerStore((s) => s.setSiteContext)
   const setIsLoadingOsm = usePlannerStore((s) => s.setIsLoadingOsm)
   const updateMasterPlan = usePlannerStore((s) => s.updateMasterPlan)
@@ -184,9 +186,12 @@ export function PlannerMap() {
       style: OSM_STYLE,
       center: BRISBANE_CENTER,
       zoom: 13,
+      maxPitch: 70,
+      dragRotate: true,
+      touchPitch: true,
     })
 
-    map.addControl(new maplibregl.NavigationControl(), 'bottom-right')
+    map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'bottom-right')
     map.addControl(new maplibregl.ScaleControl(), 'bottom-left')
 
     map.on('click', (e) => {
@@ -293,7 +298,8 @@ export function PlannerMap() {
           { padding: 40 },
         )
       } else {
-        map.flyTo({ center: detail.center, zoom: 14 })
+        const currentPitch = map.getPitch()
+        map.flyTo({ center: detail.center, zoom: 14, pitch: currentPitch })
       }
     }
     window.addEventListener('planner-fly-to', handler)
@@ -364,15 +370,29 @@ export function PlannerMap() {
 
     if (showOsmBuildings && siteContext.buildings.features.length > 0) {
       map.addSource('osm-buildings', { type: 'geojson', data: siteContext.buildings })
-      map.addLayer({
-        id: 'osm-buildings-layer',
-        type: 'fill',
-        source: 'osm-buildings',
-        paint: {
-          'fill-color': IMPRESSION.existingBuilding,
-          'fill-opacity': masterPlan ? 0.45 : 0.25,
-        },
-      })
+      if (massing3d) {
+        map.addLayer({
+          id: 'osm-buildings-layer',
+          type: 'fill-extrusion',
+          source: 'osm-buildings',
+          paint: {
+            'fill-extrusion-color': IMPRESSION.existingBuilding,
+            'fill-extrusion-opacity': masterPlan ? 0.55 : 0.35,
+            'fill-extrusion-height': EXISTING_BUILDING_HEIGHT_M,
+            'fill-extrusion-base': 0,
+          },
+        })
+      } else {
+        map.addLayer({
+          id: 'osm-buildings-layer',
+          type: 'fill',
+          source: 'osm-buildings',
+          paint: {
+            'fill-color': IMPRESSION.existingBuilding,
+            'fill-opacity': masterPlan ? 0.45 : 0.25,
+          },
+        })
+      }
     }
 
     if (siteContext.preserveAreas?.features.length > 0) {
@@ -403,7 +423,7 @@ export function PlannerMap() {
         },
       })
     }
-  }, [siteContext, showOsmStreets, showOsmBuildings, masterPlan])
+  }, [siteContext, showOsmStreets, showOsmBuildings, masterPlan, massing3d])
 
   const updateHardConstraintLayers = useCallback((map: maplibregl.Map) => {
     ;[
@@ -635,7 +655,10 @@ export function PlannerMap() {
       )
     }
 
-    const addBuildingLayer = (key: 'commercial' | 'residential' | 'industrial', fill: string) => {
+    const addBuildingLayer = (
+      key: 'commercial' | 'residential' | 'industrial' | 'office',
+      fill: string,
+    ) => {
       if (!isLayerSourceVisible(key, layerVisibility)) return
       if (!showAllLayers && !animatedLayerIds.has(key)) return
 
@@ -643,31 +666,86 @@ export function PlannerMap() {
       if (!fc?.features?.length) return
 
       map.addSource(key, { type: 'geojson', data: fc })
-      map.addLayer({
-        id: `${key}-layer`,
-        type: 'fill',
-        source: key,
-        paint: {
-          'fill-color': fill,
-          'fill-opacity': key === 'industrial' ? 0.88 : 0.92,
-          'fill-outline-color': key === 'industrial' ? '#4b5563' : IMPRESSION.buildingOutline,
-        },
-      })
-      map.addLayer({
-        id: `${key}-layer-outline`,
-        type: 'line',
-        source: key,
-        paint: {
-          'line-color': key === 'industrial' ? '#374151' : IMPRESSION.buildingOutline,
-          'line-width': key === 'industrial' ? 1.4 : 1.2,
-          'line-opacity': 0.9,
-        },
-      })
+
+      if (massing3d) {
+        map.addLayer({
+          id: `${key}-layer`,
+          type: 'fill-extrusion',
+          source: key,
+          paint: {
+            'fill-extrusion-color': fill,
+            'fill-extrusion-opacity': key === 'industrial' ? 0.85 : 0.92,
+            'fill-extrusion-height': buildingHeightExpression() as maplibregl.ExpressionSpecification,
+            'fill-extrusion-base': buildingBaseExpression() as maplibregl.ExpressionSpecification,
+          },
+        })
+      } else {
+        map.addLayer({
+          id: `${key}-layer`,
+          type: 'fill',
+          source: key,
+          paint: {
+            'fill-color': fill,
+            'fill-opacity': key === 'industrial' ? 0.88 : 0.92,
+            'fill-outline-color': key === 'industrial' ? '#4b5563' : IMPRESSION.buildingOutline,
+          },
+        })
+        map.addLayer({
+          id: `${key}-layer-outline`,
+          type: 'line',
+          source: key,
+          paint: {
+            'line-color': key === 'industrial' ? '#374151' : IMPRESSION.buildingOutline,
+            'line-width': key === 'industrial' ? 1.4 : 1.2,
+            'line-opacity': 0.9,
+          },
+        })
+      }
     }
 
     addBuildingLayer('commercial', layerColors.commercial ?? '#3b82f6')
+    addBuildingLayer('office', layerColors.office ?? '#00b8a0')
     addBuildingLayer('residential', layerColors.residential ?? '#facc15')
     addBuildingLayer('industrial', layerColors.industrial ?? '#6b7280')
+
+    // Public squares — flat plaza rendering (always 2D, height=1m in 3D)
+    const addPublicSquaresLayer = () => {
+      const squareLayerId = 'public_squares' as const
+      if (!isLayerSourceVisible(squareLayerId, layerVisibility)) return
+      if (!showAllLayers && !animatedLayerIds.has(squareLayerId)) return
+      const fc = planLayers[squareLayerId] as FeatureCollection<Polygon>
+      if (!fc?.features?.length) return
+
+      map.addSource(squareLayerId, { type: 'geojson', data: fc })
+      const plazaColor = layerColors['public-square'] ?? '#a78bfa'
+      if (massing3d) {
+        map.addLayer({
+          id: `${squareLayerId}-layer`,
+          type: 'fill-extrusion',
+          source: squareLayerId,
+          paint: {
+            'fill-extrusion-color': plazaColor,
+            'fill-extrusion-opacity': 0.7,
+            'fill-extrusion-height': 1,
+            'fill-extrusion-base': 0,
+          },
+        })
+      } else {
+        map.addLayer({
+          id: `${squareLayerId}-layer`,
+          type: 'fill',
+          source: squareLayerId,
+          paint: { 'fill-color': plazaColor, 'fill-opacity': 0.65 },
+        })
+        map.addLayer({
+          id: `${squareLayerId}-layer-outline`,
+          type: 'line',
+          source: squareLayerId,
+          paint: { 'line-color': plazaColor, 'line-width': 1.2, 'line-opacity': 0.9 },
+        })
+      }
+    }
+    addPublicSquaresLayer()
 
     const addGreenLayer = (key: 'parks' | 'green_space', color: string, withTrees: boolean) => {
       if (!isLayerSourceVisible(key, layerVisibility)) return
@@ -712,8 +790,8 @@ export function PlannerMap() {
       }
     }
 
-    addGreenLayer('parks', IMPRESSION.park, true)
-    addGreenLayer('green_space', IMPRESSION.preserve, false)
+    addGreenLayer('parks', layerColors.parks ?? IMPRESSION.park, true)
+    addGreenLayer('green_space', layerColors['green-space'] ?? IMPRESSION.preserve, false)
 
     ;(['schools', 'hospitals'] as const).forEach((key) => {
       if (!isLayerSourceVisible(key, layerVisibility)) return
@@ -931,7 +1009,7 @@ export function PlannerMap() {
         },
       })
     }
-  }, [masterPlan, layers, animatedLayerIds, showAllLayers, siteContext, boundary])
+  }, [masterPlan, layers, animatedLayerIds, showAllLayers, siteContext, boundary, massing3d])
 
   useEffect(() => {
     const map = mapRef.current
@@ -947,6 +1025,17 @@ export function PlannerMap() {
     updatePlanLayers(map)
     updateHardConstraintLayers(map)
   }, [mapReady, masterPlan, siteContext, updatePlanLayers, updateSoftOsmLayers, updateHardConstraintLayers])
+
+  // Camera pitch when 3D massing is active and a plan exists
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !mapReady) return
+    if (massing3d && masterPlan) {
+      map.easeTo({ pitch: 52, bearing: -28, duration: 800 })
+    } else if (!massing3d) {
+      map.easeTo({ pitch: 0, bearing: 0, duration: 600 })
+    }
+  }, [massing3d, masterPlan, mapReady])
 
   useEffect(() => {
     if (!masterPlan || !boundary || !siteContext) return

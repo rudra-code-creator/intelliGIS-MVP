@@ -26,8 +26,10 @@ const REFINE_STEPS = [
 const LAYER_ORDER = [
   'green_space',
   'parks',
+  'public_squares',
   'industrial',
   'residential',
+  'office',
   'commercial',
   'roads',
   'bike_paths',

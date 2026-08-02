@@ -16,6 +16,7 @@ import {
 import type { LayerId } from '@/types/master-plan'
 import { cn } from '@/lib/utils'
 import { IMPRESSION } from '@/lib/impression-styles'
+import { LayerColorPicker } from '@/components/Sidebar/LayerColorPicker'
 
 function featureCount(layerId: LayerId, masterPlan: ReturnType<typeof usePlannerStore.getState>['masterPlan']): number {
   if (!masterPlan) return 0
@@ -64,7 +65,9 @@ export function LayerSidebar() {
           <span className="text-[10px] uppercase tracking-wider text-zinc-600">Overlay</span>
         </div>
         <p className="mt-1 text-xs text-zinc-500">
-          {masterPlan ? 'Click layer to draw · toggle visibility' : 'Generate a plan to edit layers'}
+          {masterPlan
+            ? 'Click swatch for color · layer name to draw'
+            : 'Generate a plan to edit layers'}
         </p>
       </div>
 
@@ -134,18 +137,12 @@ export function LayerSidebar() {
                 {layer.visible ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5 opacity-50" />}
               </button>
 
-              <label className="relative shrink-0 cursor-pointer" title="Layer color">
-                <span
-                  className="block h-4 w-4 rounded border border-white/20"
-                  style={{ backgroundColor: layer.color }}
-                />
-                <input
-                  type="color"
-                  value={layer.color}
-                  onChange={(e) => setLayerColor(layer.id, e.target.value)}
-                  className="absolute inset-0 cursor-pointer opacity-0"
-                />
-              </label>
+              <LayerColorPicker
+                layerId={layer.id}
+                label={layer.label}
+                color={layer.color}
+                onChange={(next) => setLayerColor(layer.id, next)}
+              />
 
               <button
                 type="button"

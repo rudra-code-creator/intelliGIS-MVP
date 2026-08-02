@@ -50,6 +50,7 @@ interface PlannerState {
   showOsmStreets: boolean
   showOsmBuildings: boolean
   showHardConstraints: boolean
+  massing3d: boolean
   editHistory: MasterPlanResult[]
   editHistoryIndex: number
   isLoadingOsm: boolean
@@ -70,6 +71,7 @@ interface PlannerState {
   toggleOsmStreets: () => void
   toggleOsmBuildings: () => void
   toggleHardConstraints: () => void
+  toggleMassing3d: () => void
   setIsLoadingOsm: (loading: boolean) => void
   startGeneration: () => void
   startRefinement: () => void
@@ -132,6 +134,7 @@ export const usePlannerStore = create<PlannerState>((set, get) => ({
   showOsmStreets: true,
   showOsmBuildings: true,
   showHardConstraints: true,
+  massing3d: true,
   editHistory: [],
   editHistoryIndex: -1,
   isLoadingOsm: false,
@@ -167,6 +170,8 @@ export const usePlannerStore = create<PlannerState>((set, get) => ({
     else if (key === 'transit') next.layers.transit = empty as MasterPlanLayers['transit']
     else if (key === 'residential') next.layers.residential = empty as MasterPlanLayers['residential']
     else if (key === 'commercial') next.layers.commercial = empty as MasterPlanLayers['commercial']
+    else if (key === 'office') next.layers.office = empty as MasterPlanLayers['office']
+    else if (key === 'public_squares') next.layers.public_squares = empty as MasterPlanLayers['public_squares']
     else if (key === 'industrial') next.layers.industrial = empty as MasterPlanLayers['industrial']
     else if (key === 'parks') next.layers.parks = empty as MasterPlanLayers['parks']
     else if (key === 'green_space') next.layers.green_space = empty as MasterPlanLayers['green_space']
@@ -184,6 +189,7 @@ export const usePlannerStore = create<PlannerState>((set, get) => ({
   toggleOsmStreets: () => set((s) => ({ showOsmStreets: !s.showOsmStreets })),
   toggleOsmBuildings: () => set((s) => ({ showOsmBuildings: !s.showOsmBuildings })),
   toggleHardConstraints: () => set((s) => ({ showHardConstraints: !s.showHardConstraints })),
+  toggleMassing3d: () => set((s) => ({ massing3d: !s.massing3d })),
   setIsLoadingOsm: (loading) => set({ isLoadingOsm: loading }),
   startGeneration: () =>
     set({
@@ -284,7 +290,7 @@ export const usePlannerStore = create<PlannerState>((set, get) => ({
         prompt: '',
         isGenerating: false,
         generationStep: 'complete',
-        animatedLayerIds: new Set(['roads', 'transit', 'bike_paths', 'commercial', 'residential', 'industrial']),
+        animatedLayerIds: new Set(['roads', 'transit', 'bike_paths', 'commercial', 'office', 'public_squares', 'residential', 'industrial']),
         history: [{ id: uuid(), prompt: followUp, timestamp: Date.now() }, ...state.history].slice(0, 20),
         ...historyUpdate,
       }
@@ -383,7 +389,7 @@ export const usePlannerStore = create<PlannerState>((set, get) => ({
       })
     }
 
-    ;(['roads', 'bike_paths', 'transit', 'residential', 'commercial', 'industrial', 'parks', 'green_space', 'schools', 'hospitals'] as const).forEach(tryLayer)
+    ;(['roads', 'bike_paths', 'transit', 'residential', 'commercial', 'office', 'public_squares', 'industrial', 'parks', 'green_space', 'schools', 'hospitals'] as const).forEach(tryLayer)
     tryLayer('annotations')
 
     if (bestKey === null || bestIdx < 0) return

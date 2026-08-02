@@ -18,6 +18,8 @@ export interface AiGeometryInput {
   transit?: AiLineInput[]
   residential?: AiPolygonInput[]
   commercial?: AiPolygonInput[]
+  office?: AiPolygonInput[]
+  public_squares?: AiPolygonInput[]
   industrial?: AiPolygonInput[]
   parks?: AiPolygonInput[]
   green_space?: AiPolygonInput[]
@@ -157,6 +159,8 @@ export function buildLayersFromAiGeometry(
     transit: buildLines(geometry.transit, boundary, { type: 'transit', mode: 'bus' }),
     residential: buildPolygons(geometry.residential, boundary, 'residential'),
     commercial: buildPolygons(geometry.commercial, boundary, 'commercial'),
+    office: buildPolygons(geometry.office, boundary, 'office'),
+    public_squares: buildPolygons(geometry.public_squares, boundary, 'public-square'),
     industrial: buildPolygons(geometry.industrial, boundary, 'industrial'),
     parks: buildPolygons(geometry.parks, boundary, 'park'),
     green_space: buildPolygons(geometry.green_space, boundary, 'green'),
@@ -183,6 +187,8 @@ export function countGeometryFeatures(layers: MasterPlanLayers): number {
     layers.transit.features.length +
     layers.residential.features.length +
     layers.commercial.features.length +
+    layers.office.features.length +
+    layers.public_squares.features.length +
     layers.industrial.features.length +
     layers.parks.features.length +
     layers.green_space.features.length +
@@ -204,6 +210,8 @@ export function mergeLayers(
     transit: pick(ai.transit, fallback.transit),
     residential: pick(ai.residential, fallback.residential),
     commercial: pick(ai.commercial, fallback.commercial),
+    office: pick(ai.office, fallback.office),
+    public_squares: pick(ai.public_squares, fallback.public_squares),
     industrial: pick(ai.industrial, fallback.industrial),
     parks: pick(ai.parks, fallback.parks),
     green_space: pick(ai.green_space, fallback.green_space),

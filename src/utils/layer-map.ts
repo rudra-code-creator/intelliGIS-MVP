@@ -4,10 +4,12 @@ import type { LayerId } from '@/types/master-plan'
 export const LAYER_ID_TO_SOURCE: Partial<Record<LayerId, string>> = {
   'green-space': 'green_space',
   'bike-network': 'bike_paths',
+  'public-square': 'public_squares',
   roads: 'roads',
   parks: 'parks',
   residential: 'residential',
   commercial: 'commercial',
+  office: 'office',
   industrial: 'industrial',
   transit: 'transit',
   schools: 'schools',

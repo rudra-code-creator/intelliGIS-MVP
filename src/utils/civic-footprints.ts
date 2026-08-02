@@ -1,5 +1,6 @@
 import * as turf from '@turf/turf'
 import type { Feature, Polygon, Position } from 'geojson'
+import { SCHOOL_HEIGHT_M, HOSPITAL_HEIGHT_M, EXISTING_BUILDING_HEIGHT_M } from '@/utils/building-heights'
 
 export function buildOrientedCampus(
   center: Position,
@@ -28,6 +29,9 @@ export function buildSchoolCampus(center: Position, gridBearing: number): Featur
     name: 'Community School',
     campus: true,
     footprintM2: 95 * 130,
+    heightM: SCHOOL_HEIGHT_M,
+    baseM: 0,
+    height: 'mid',
   })
 }
 
@@ -37,5 +41,10 @@ export function buildHospitalCampus(center: Position, gridBearing: number): Feat
     name: 'District Health Centre',
     campus: true,
     footprintM2: 140 * 180,
+    heightM: HOSPITAL_HEIGHT_M,
+    baseM: 0,
+    height: 'mid',
   })
 }
+
+export { EXISTING_BUILDING_HEIGHT_M }
