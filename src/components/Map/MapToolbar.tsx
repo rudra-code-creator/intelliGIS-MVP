@@ -19,6 +19,7 @@ import {
   Check,
   X,
   Route,
+  Box,
 } from 'lucide-react'
 
 const TOOLS: { id: MapTool; icon: typeof Pencil; label: string; shortcut?: string; requiresPlan?: boolean }[] = [
@@ -64,6 +65,8 @@ export function MapToolbar({
   const editHistoryIndex = usePlannerStore((s) => s.editHistoryIndex)
   const editHistory = usePlannerStore((s) => s.editHistory)
   const masterPlan = usePlannerStore((s) => s.masterPlan)
+  const massing3d = usePlannerStore((s) => s.massing3d)
+  const toggleMassing3d = usePlannerStore((s) => s.toggleMassing3d)
 
   const [searchQuery, setSearchQuery] = useState('')
   const [searching, setSearching] = useState(false)
@@ -107,6 +110,19 @@ export function MapToolbar({
             <Icon className="h-3.5 w-3.5" />
           </Button>
         ))}
+
+        <div className="mx-1 h-6 w-px bg-white/10" />
+
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          className={cn('h-8 w-8 shrink-0', massing3d && 'text-[#00b8a0]')}
+          title="Toggle 3D Building Massing"
+          onClick={toggleMassing3d}
+        >
+          <Box className="h-3.5 w-3.5" />
+        </Button>
 
         <div className="mx-1 h-6 w-px bg-white/10" />
 

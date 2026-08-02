@@ -14,6 +14,8 @@ export function generateMockMasterPlan(request: GenerateRequest): MasterPlanResu
       parks: turf.featureCollection([]),
       residential: turf.featureCollection([]),
       commercial: turf.featureCollection([]),
+      office: turf.featureCollection([]),
+      public_squares: turf.featureCollection([]),
       industrial: turf.featureCollection([]),
       bike_paths: turf.featureCollection([]),
       transit: turf.featureCollection([]),

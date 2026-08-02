@@ -19,6 +19,12 @@ import { buildHospitalCampus, buildSchoolCampus } from '@/utils/civic-footprints
 import { enrichRoadCollection } from '@/utils/osm-road-enrich'
 import { generateStyledBlocks } from '@/utils/layout-styles'
 import type { RoadClass } from '@/utils/road-names'
+import {
+  mixedUseTowerMassing,
+  parcelToMassing,
+  publicSquareFootprint,
+  pushSegments,
+} from '@/utils/building-massing'
 
 export interface PlanIntent {
   cbd: boolean
@@ -176,103 +182,14 @@ function extractBlocksFromStreets(
 
 type LandUseParcel = 'commercial' | 'residential' | 'industrial'
 
+/** Legacy footprint helper kept for non-CBD paths. */
 function parcelToFootprints(
   parcel: Feature<Polygon>,
   landUse: LandUseParcel,
   intent: PlanIntent,
   gridBearing: number,
 ): Feature<Polygon>[] {
-  const area = turf.area(parcel)
-  if (area > 35000) {
-    return subdivideIntoFootprints(parcel, landUse, intent, gridBearing, 2)
-  }
-
-  const insetM = landUse === 'commercial' ? 6 : landUse === 'industrial' ? 5 : 10
-  let footprint = turf.buffer(parcel, -insetM, { units: 'meters', steps: 4 })
-  if (!footprint || turf.area(footprint) < 400) footprint = parcel
-  if (footprint.geometry.type === 'MultiPolygon') {
-    const polys = footprint.geometry.coordinates.map((c) => turf.polygon(c))
-    footprint = polys.sort((a, b) => turf.area(b) - turf.area(a))[0]
-  }
-  if (!footprint || turf.area(footprint) < 250) return []
-
-  footprint.properties = {
-    landUse,
-    impression: true,
-    height: landUse === 'commercial' ? (intent.cbd ? 'high' : 'mid') : landUse === 'industrial' ? 'warehouse' : 'low',
-  }
-  return [footprint as Feature<Polygon>]
-}
-
-function subdivideIntoFootprints(
-  parcel: Feature<Polygon>,
-  landUse: LandUseParcel,
-  intent: PlanIntent,
-  gridRotationDeg: number,
-  maxPieces = 4,
-): Feature<Polygon>[] {
-  const insetM = landUse === 'commercial' ? (intent.cbd ? 4 : 6) : landUse === 'industrial' ? 4 : 8
-  let inset = turf.buffer(parcel, -insetM, { units: 'meters', steps: 4 })
-  if (!inset) return []
-  if (inset.geometry.type === 'MultiPolygon') {
-    const polys = inset.geometry.coordinates.map((c) => turf.polygon(c))
-    inset = polys.sort((a, b) => turf.area(b) - turf.area(a))[0]
-  }
-  if (!inset || turf.area(inset) < 300) return []
-
-  const area = turf.area(inset)
-  let count = 1
-  if (landUse === 'commercial') {
-    count = intent.cbd ? (area > 12000 ? 2 : 1) : area > 8000 ? 2 : 1
-  } else if (landUse === 'industrial') {
-    count = area > 14000 ? 2 : 1
-  } else {
-    count = area > 12000 ? 3 : area > 7000 ? 2 : 1
-  }
-  count = Math.min(count, maxPieces)
-
-  const pivot = turf.centroid(inset)
-  const rotatedInset = turf.transformRotate(inset, -gridRotationDeg, { pivot }) as Feature<Polygon>
-  const bbox = turf.bbox(rotatedInset)
-  const [minX, minY, maxX, maxY] = bbox
-  const cols = count <= 2 ? count : count <= 4 ? 2 : 3
-  const rows = Math.ceil(count / cols)
-  const footprints: Feature<Polygon>[] = []
-
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      if (footprints.length >= count) break
-      const padX = (maxX - minX) * 0.04
-      const padY = (maxY - minY) * 0.04
-      const w = (maxX - minX - padX * 2) / cols
-      const h = (maxY - minY - padY * 2) / rows
-      const x1 = minX + padX + c * w
-      const y1 = minY + padY + r * h
-      try {
-        const rect = turf.bboxPolygon([x1, y1, x1 + w * 0.92, y1 + h * 0.92])
-        const clipped = turf.intersect(turf.featureCollection([rect, rotatedInset]))
-        if (!clipped || clipped.geometry.type !== 'Polygon' || turf.area(clipped) <= 200) continue
-        const world = turf.transformRotate(clipped, gridRotationDeg, { pivot }) as Feature<Polygon>
-        const finalClip = turf.intersect(turf.featureCollection([world, inset]))
-        if (!finalClip || finalClip.geometry.type !== 'Polygon' || turf.area(finalClip) <= 200) continue
-        finalClip.properties = {
-          landUse,
-          impression: true,
-          height: landUse === 'commercial' ? (intent.cbd ? 'high' : 'mid') : landUse === 'industrial' ? 'warehouse' : 'low',
-        }
-        footprints.push(finalClip as Feature<Polygon>)
-      } catch {
-        continue
-      }
-    }
-  }
-
-  if (footprints.length === 0) {
-    inset.properties = { landUse, impression: true }
-    footprints.push(inset as Feature<Polygon>)
-  }
-
-  return footprints
+  return parcelToMassing(parcel, landUse, intent, gridBearing)
 }
 
 /** Zoning no-build: rivers, rail, highways, arterials (all hardConstraintAreas). */
@@ -365,6 +282,8 @@ function classifyAndBuildLayers(
   gridBearing: number,
 ): {
   commercial: Feature<Polygon>[]
+  office: Feature<Polygon>[]
+  public_squares: Feature<Polygon>[]
   residential: Feature<Polygon>[]
   industrial: Feature<Polygon>[]
   parks: Feature<Polygon>[]
@@ -375,7 +294,6 @@ function classifyAndBuildLayers(
   const waterfrontActive = intent.waterfront || hasWater
   let developable = buildDevelopableParcels(blocks, context, boundary)
 
-  // Prefer waterfront parcels for parks / amenity edges
   if (waterfrontActive) {
     developable = [...developable].sort((a, b) => {
       const waterDelta = a.waterDist - b.waterDist
@@ -385,19 +303,34 @@ function classifyAndBuildLayers(
   }
 
   const commercial: Feature<Polygon>[] = []
+  const office: Feature<Polygon>[] = []
+  const public_squares: Feature<Polygon>[] = []
   const residential: Feature<Polygon>[] = []
   const industrial: Feature<Polygon>[] = []
   const parks: Feature<Polygon>[] = []
   const green_space: Feature<Polygon>[] = []
   const trees: Feature<Point>[] = []
 
+  const massingIntent = { cbd: intent.cbd, highDensity: intent.highDensity }
+
+  // CBD-specific allocation counts
+  const squareCount = intent.cbd ? Math.min(3, Math.max(1, Math.floor(developable.length * 0.08))) : 0
+  const officeCount = intent.cbd
+    ? Math.min(5, Math.max(2, Math.floor(developable.length * 0.25)))
+    : intent.highDensity
+      ? Math.min(3, Math.max(1, Math.floor(developable.length * 0.12)))
+      : 0
+  const mixedTowerCount = intent.cbd ? Math.min(3, Math.max(1, Math.floor(developable.length * 0.12))) : 0
+
   const commercialCount = intent.cbd
-    ? Math.min(6, Math.max(3, Math.floor(developable.length * 0.35)))
+    ? Math.min(4, Math.max(2, Math.floor(developable.length * 0.2)))
     : Math.min(4, Math.max(2, Math.floor(developable.length * 0.2)))
 
   const industrialCount = intent.industrial
     ? Math.min(4, Math.max(2, Math.floor(developable.length * 0.14)))
-    : Math.min(3, Math.max(1, Math.floor(developable.length * 0.1)))
+    : intent.cbd
+      ? Math.min(1, Math.floor(developable.length * 0.04))
+      : Math.min(3, Math.max(1, Math.floor(developable.length * 0.1)))
 
   const parkBase = intent.greenCity || intent.moreParks || waterfrontActive ? 0.2 : 0.12
   const parkBoost = intent.moreParks ? 0.1 : waterfrontActive ? 0.06 : 0
@@ -406,7 +339,6 @@ function classifyAndBuildLayers(
     Math.max(intent.moreParks || waterfrontActive ? 3 : 1, Math.floor(developable.length * (parkBase + parkBoost))),
   )
 
-  // When waterfront: assign nearest-to-water parcels as parks first, then commercial/industrial/resi from remaining
   const parkIndices = new Set<number>()
   if (waterfrontActive && developable.length > 0) {
     const waterSorted = [...developable.entries()]
@@ -415,14 +347,21 @@ function classifyAndBuildLayers(
     for (const [idx] of waterSorted) parkIndices.add(idx)
   }
 
+  let assignedSquares = 0
+  let assignedOffice = 0
+  let assignedMixedTowers = 0
   let assignedCommercial = 0
   let assignedIndustrial = 0
   let assignedParks = 0
 
+  // Distance from centroid — closer = more CBD, further = more residential
+  const centroid = turf.centroid(boundary)
+
   developable.forEach((item, index) => {
+    // Waterfront parks first
     if (parkIndices.has(index) || (!waterfrontActive && index >= commercialCount + industrialCount && index < commercialCount + industrialCount + parkCount)) {
       if (assignedParks >= parkCount && !parkIndices.has(index)) {
-        // fall through to residential below
+        // fall through
       } else {
         try {
           const park = turf.buffer(item.parcel, -3, { units: 'meters', steps: 6 })
@@ -440,24 +379,64 @@ function classifyAndBuildLayers(
     }
 
     if (parkIndices.has(index)) {
-      // park buffer failed — treat as green easement
       item.parcel.properties = { landUse: 'green', impression: true, waterfront: true }
       green_space.push(item.parcel)
       return
     }
 
+    // CBD: public squares near center
+    if (intent.cbd && assignedSquares < squareCount) {
+      const distFromCenter = turf.distance(centroid, turf.centroid(item.parcel), { units: 'kilometers' })
+      if (distFromCenter < 0.4) {
+        const sq = publicSquareFootprint(item.parcel)
+        if (sq) {
+          public_squares.push(sq)
+          assignedSquares++
+          return
+        }
+      }
+    }
+
+    // CBD: mixed-use towers in the core
+    if (intent.cbd && assignedMixedTowers < mixedTowerCount) {
+      const distFromCenter = turf.distance(centroid, turf.centroid(item.parcel), { units: 'kilometers' })
+      if (distFromCenter < 0.5 && item.area > 3000) {
+        const towerParts = mixedUseTowerMassing(item.parcel, gridBearing, massingIntent)
+        if (towerParts.length > 0) {
+          for (const part of towerParts) {
+            const lu = part.properties?.landUse as string
+            if (lu === 'office') office.push(part)
+            else if (lu === 'residential') residential.push(part)
+            else commercial.push(part)
+          }
+          assignedMixedTowers++
+          return
+        }
+      }
+    }
+
+    // Office district
+    if (assignedOffice < officeCount) {
+      pushSegments(office, item.parcel, 'office', massingIntent, gridBearing)
+      assignedOffice++
+      return
+    }
+
+    // Commercial
     if (assignedCommercial < commercialCount) {
-      commercial.push(...parcelToFootprints(item.parcel, 'commercial', intent, gridBearing))
+      pushSegments(commercial, item.parcel, 'commercial', massingIntent, gridBearing)
       assignedCommercial++
       return
     }
 
+    // Industrial
     if (assignedIndustrial < industrialCount) {
-      industrial.push(...parcelToFootprints(item.parcel, 'industrial', intent, gridBearing))
+      pushSegments(industrial, item.parcel, 'industrial', massingIntent, gridBearing)
       assignedIndustrial++
       return
     }
 
+    // Non-waterfront parks
     if (!waterfrontActive && assignedParks < parkCount) {
       try {
         const park = turf.buffer(item.parcel, -3, { units: 'meters', steps: 6 })
@@ -473,21 +452,27 @@ function classifyAndBuildLayers(
       }
     }
 
-    residential.push(...parcelToFootprints(item.parcel, 'residential', intent, gridBearing))
+    // Residential — vary height by distance from core
+    const distFromCenter = turf.distance(centroid, turf.centroid(item.parcel), { units: 'kilometers' })
+    const resIntent = {
+      cbd: distFromCenter < 0.3 && intent.cbd,
+      highDensity: distFromCenter < 0.5 && (intent.cbd || intent.highDensity),
+    }
+    pushSegments(residential, item.parcel, 'residential', resIntent, gridBearing)
   })
 
+  // Ensure minimum viable commercial/residential even if parcels were sparse
   if (commercial.length === 0 && developable.length > 0) {
     const pick = developable.find((_, i) => !parkIndices.has(i)) ?? developable[0]
-    commercial.push(...parcelToFootprints(pick.parcel, 'commercial', intent, gridBearing))
+    pushSegments(commercial, pick.parcel, 'commercial', massingIntent, gridBearing)
   }
   if (residential.length === 0 && developable.length > 1) {
     const pick = developable.find((_, i) => !parkIndices.has(i) && i > 0) ?? developable[1]
-    residential.push(...parcelToFootprints(pick.parcel, 'residential', intent, gridBearing))
+    pushSegments(residential, pick.parcel, 'residential', massingIntent, gridBearing)
   }
-
-  if (industrial.length === 0 && developable.length > 2) {
+  if (industrial.length === 0 && developable.length > 2 && !intent.cbd) {
     const pick = developable.find((_, i) => !parkIndices.has(i) && i > 1) ?? developable[2]
-    industrial.push(...parcelToFootprints(pick.parcel, 'industrial', intent, gridBearing))
+    pushSegments(industrial, pick.parcel, 'industrial', massingIntent, gridBearing)
   }
 
   for (const preserve of context.preserveAreas.features.slice(0, 3)) {
@@ -503,11 +488,12 @@ function classifyAndBuildLayers(
     }
   }
 
-  // Hard-constraint buffers stay as map overlays only — do not style as green_space parks
   const hard = zoningForbidden(context)
 
   return {
     commercial: filterFootprintsOffConstraints(commercial, hard),
+    office: filterFootprintsOffConstraints(office, hard),
+    public_squares: filterFootprintsOffConstraints(public_squares, hard),
     residential: filterFootprintsOffConstraints(residential, hard),
     industrial: filterFootprintsOffConstraints(industrial, hard),
     parks: filterFootprintsOffConstraints(parks, hard),
@@ -738,8 +724,6 @@ export function buildOsmMasterPlan(
   let roads = turf.featureCollection(
     transport.roads.features.filter((f) => {
       if (f.properties?.bridge) return true
-      // Existing hard highways that merely follow their own corridor stay;
-      // anything else must not cut through river/rail.
       const hw = String(f.properties?.highway ?? '')
       if (HARD_HIGHWAYS.has(hw) && !lineCrossesForbidden(f, crossing)) return true
       return !lineCrossesForbidden(f, crossing)
@@ -752,40 +736,38 @@ export function buildOsmMasterPlan(
   ]
 
   let commercial = filterFootprintsOffConstraints(classified.commercial, hard)
+  let office = filterFootprintsOffConstraints(classified.office, hard)
+  const public_squares = filterFootprintsOffConstraints(classified.public_squares, hard)
   let residential = filterFootprintsOffConstraints(classified.residential, hard)
   let industrial = filterFootprintsOffConstraints(classified.industrial, hard)
 
   // Last-resort fill only from hard-constraint-safe blocks
   if (commercial.length === 0 && residential.length === 0 && blocks.length > 0) {
+    const massingIntent = { cbd: intent.cbd, highDensity: intent.highDensity }
     const fallbackBlocks = blocks
       .filter((b) => turf.area(b) > 800)
       .filter((b) => isDevelopableBlock(b, context.buildings, context.preserveAreas, hard))
       .sort((a, b) => turf.area(b) - turf.area(a))
       .slice(0, 16)
     commercial = filterFootprintsOffConstraints(
-      fallbackBlocks.slice(0, Math.min(4, fallbackBlocks.length)).map((parcel) => {
-        const copy = turf.clone(parcel)
-        copy.properties = { landUse: 'commercial', impression: true, height: 'mid' }
-        return copy
-      }),
+      fallbackBlocks.slice(0, Math.min(4, fallbackBlocks.length)).flatMap((parcel) =>
+        parcelToMassing(parcel, 'commercial', massingIntent, gridBearing),
+      ),
       hard,
     )
     industrial = filterFootprintsOffConstraints(
-      fallbackBlocks.slice(commercial.length, commercial.length + 2).map((parcel) => {
-        const copy = turf.clone(parcel)
-        copy.properties = { landUse: 'industrial', impression: true, height: 'warehouse' }
-        return copy
-      }),
+      fallbackBlocks.slice(commercial.length, commercial.length + 2).flatMap((parcel) =>
+        parcelToMassing(parcel, 'industrial', massingIntent, gridBearing),
+      ),
       hard,
     )
     residential = filterFootprintsOffConstraints(
-      fallbackBlocks.slice(commercial.length + industrial.length).map((parcel) => {
-        const copy = turf.clone(parcel)
-        copy.properties = { landUse: 'residential', impression: true, height: 'low' }
-        return copy
-      }),
+      fallbackBlocks.slice(commercial.length + industrial.length).flatMap((parcel) =>
+        parcelToMassing(parcel, 'residential', massingIntent, gridBearing),
+      ),
       hard,
     )
+    office = []
   }
 
   const schoolCoord = pointOnDevelopableLand(boundary, context.buildings, context.preserveAreas, hard)
@@ -811,6 +793,8 @@ export function buildOsmMasterPlan(
     bike_paths,
     transit,
     commercial: turf.featureCollection(commercial),
+    office: turf.featureCollection(office),
+    public_squares: turf.featureCollection(public_squares),
     residential: turf.featureCollection(residential),
     industrial: turf.featureCollection(industrial),
     parks: { type: 'FeatureCollection', features: parkFeatures } as FeatureCollection<Polygon | Point>,
